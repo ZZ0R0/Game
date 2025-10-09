@@ -1,0 +1,10 @@
+[package]
+name = "engine_app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_core = { path = "../engine_core" }
+render_wgpu = { path = "../render_wgpu" }
+voxel_engine = { path = "../voxel_engine" }
+glam = "0.27"

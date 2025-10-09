@@ -1,0 +1,7 @@
+[build]
+incremental = true
+
+[target.x86_64-unknown-linux-gnu]
+# Optional faster linker if you have lld
+# linker = "clang"
+# rustflags = ["-Clink-arg=-fuse-ld=lld"]

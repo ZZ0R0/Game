@@ -1,0 +1,35 @@
+[workspace]
+members = [
+  "crates/engine_app",
+  "crates/render_wgpu",
+  "crates/engine_core",
+  "crates/engine_ecs",
+  "crates/voxel_engine",
+  "crates/physics_engine",
+  "crates/scripting_host",
+  "crates/asset_pipeline",
+  "crates/save_load",
+  "crates/netcode",
+  "crates/ui_egui",
+  "crates/gameplay_rts",
+  "crates/pathfinding",
+  "crates/math_util",
+  "crates/diagnostics",
+  "crates/editor",
+  "crates/tools_cli",
+  "crates/data_formats",
+  "crates/ai",
+  "crates/input_bindings",
+]
+resolver = "2"
+
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+lto = "thin"
+codegen-units = 1
+opt-level = "s"
