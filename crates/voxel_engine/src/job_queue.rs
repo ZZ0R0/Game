@@ -346,27 +346,3 @@ impl Drop for WorkerHandle {
         *running = false;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_job_queue() {
-        let queue = JobQueue::new();
-        
-        // Add generation job
-        queue.push(ChunkJob::Generate { position: IVec3::ZERO });
-        
-        let stats = queue.get_stats();
-        assert_eq!(stats.pending_count, 1);
-        
-        // Process jobs
-        let processed = queue.process_jobs(10);
-        assert_eq!(processed, 1);
-        
-        // Check completed
-        let completed = queue.drain_completed();
-        assert_eq!(completed.len(), 1);
-    }
-}

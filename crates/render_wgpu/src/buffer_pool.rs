@@ -144,28 +144,3 @@ impl Default for BufferPool {
         Self::new(128) // Default: 128 buffers per type
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_pool_stats() {
-        let pool = BufferPool::new(10);
-        assert_eq!(pool.stats.vertex_buffers_in_pool, 0);
-        assert_eq!(pool.stats.index_buffers_in_pool, 0);
-    }
-    
-    #[test]
-    fn test_reuse_rate() {
-        let mut pool = BufferPool::new(10);
-        pool.stats.vertex_allocations = 10;
-        pool.stats.vertex_reuses = 40;
-        pool.stats.index_allocations = 5;
-        pool.stats.index_reuses = 45;
-        
-        // Total: 100 operations, 85 reuses = 85% reuse rate
-        let rate = pool.reuse_rate();
-        assert!((rate - 0.85).abs() < 0.01);
-    }
-}

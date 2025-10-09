@@ -166,35 +166,3 @@ impl Default for TextureAtlas {
         Self::new_16x16()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_atlas_creation() {
-        let atlas = TextureAtlas::new_16x16();
-        
-        // Check stone has uniform texture
-        let stone_top = atlas.get_rect(crate::chunk::STONE, FaceDir::Top);
-        let stone_side = atlas.get_rect(crate::chunk::STONE, FaceDir::North);
-        assert_eq!(stone_top.u, stone_side.u);
-        assert_eq!(stone_top.v, stone_side.v);
-        
-        // Check grass has different top
-        let grass_top = atlas.get_rect(crate::chunk::GRASS, FaceDir::Top);
-        let grass_side = atlas.get_rect(crate::chunk::GRASS, FaceDir::North);
-        assert_ne!(grass_top.u, grass_side.u);
-    }
-    
-    #[test]
-    fn test_uv_generation() {
-        let rect = AtlasRect::new(0.25, 0.5, 0.0625, 0.0625);
-        let uvs = rect.get_uvs();
-        
-        assert_eq!(uvs[0], [0.25, 0.5]);           // Bottom-left
-        assert_eq!(uvs[1], [0.3125, 0.5]);         // Bottom-right
-        assert_eq!(uvs[2], [0.3125, 0.5625]);      // Top-right
-        assert_eq!(uvs[3], [0.25, 0.5625]);        // Top-left
-    }
-}

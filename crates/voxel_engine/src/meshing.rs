@@ -12,6 +12,201 @@ pub struct MeshData {
     pub indices: Vec<u32>,
 }
 
+impl MeshData {
+    /// Get statistics for this mesh
+    pub fn stats(&self) -> MeshStats {
+        MeshStats {
+            vertex_count: self.positions.len(),
+            triangle_count: self.indices.len() / 3,
+            memory_bytes: self.memory_size(),
+        }
+    }
+    
+    /// Calculate memory usage
+    pub fn memory_size(&self) -> usize {
+        self.positions.len() * std::mem::size_of::<[f32; 3]>()
+            + self.uvs.len() * std::mem::size_of::<[f32; 2]>()
+            + self.ao.len() * std::mem::size_of::<f32>()
+            + self.indices.len() * std::mem::size_of::<u32>()
+    }
+    
+    /// Calculate axis-aligned bounding box
+    pub fn calculate_aabb(&self) -> AABB {
+        if self.positions.is_empty() {
+            return AABB::default();
+        }
+        
+        let mut min = glam::Vec3::splat(f32::MAX);
+        let mut max = glam::Vec3::splat(f32::MIN);
+        
+        for pos in &self.positions {
+            let p = glam::Vec3::from_array(*pos);
+            min = min.min(p);
+            max = max.max(p);
+        }
+        
+        AABB { min, max }
+    }
+}
+
+/// Axis-aligned bounding box
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AABB {
+    pub min: glam::Vec3,
+    pub max: glam::Vec3,
+}
+
+impl AABB {
+    pub fn center(&self) -> glam::Vec3 {
+        (self.min + self.max) * 0.5
+    }
+    
+    pub fn size(&self) -> glam::Vec3 {
+        self.max - self.min
+    }
+}
+
+/// Mesh statistics
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MeshStats {
+    pub vertex_count: usize,
+    pub triangle_count: usize,
+    pub memory_bytes: usize,
+}
+
+/// Unified mesh build output for both block and density meshers
+#[derive(Debug, Default, Clone)]
+pub struct MeshBuildOutput {
+    /// Vertex positions
+    pub positions: Vec<[f32; 3]>,
+    
+    /// UV coordinates (for block meshes)
+    pub uvs: Vec<[f32; 2]>,
+    
+    /// Normals (for density meshes)
+    pub normals: Vec<[f32; 3]>,
+    
+    /// Ambient occlusion per vertex
+    pub ao: Vec<f32>,
+    
+    /// Indices
+    pub indices: Vec<u32>,
+    
+    /// Submesh ranges (for opaque/transparent separation)
+    pub submeshes: Vec<SubmeshRange>,
+    
+    /// Axis-aligned bounding box
+    pub aabb: AABB,
+    
+    /// Statistics
+    pub stats: MeshStats,
+}
+
+/// Submesh range (for separating opaque/transparent geometry)
+#[derive(Debug, Clone, Copy)]
+pub struct SubmeshRange {
+    pub start_index: u32,
+    pub index_count: u32,
+    pub material_type: MaterialType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaterialType {
+    Opaque,
+    Transparent,
+}
+
+impl MeshBuildOutput {
+    /// Create from legacy MeshData (for block meshes)
+    pub fn from_mesh_data(mesh: MeshData) -> Self {
+        let aabb = mesh.calculate_aabb();
+        let stats = mesh.stats();
+        
+        Self {
+            positions: mesh.positions,
+            uvs: mesh.uvs,
+            normals: vec![], // No normals for block meshes
+            ao: mesh.ao,
+            indices: mesh.indices,
+            submeshes: vec![SubmeshRange {
+                start_index: 0,
+                index_count: stats.triangle_count as u32 * 3,
+                material_type: MaterialType::Opaque,
+            }],
+            aabb,
+            stats,
+        }
+    }
+    
+    /// Create from separated meshes (opaque + transparent)
+    pub fn from_separated_mesh(separated: SeparatedMesh) -> Self {
+        let mut output = Self::default();
+        
+        let opaque_vert_count = separated.opaque.positions.len() as u32;
+        let opaque_tri_count = (separated.opaque.indices.len() / 3) as u32;
+        let _transparent_vert_count = separated.transparent.positions.len() as u32;
+        let transparent_tri_count = (separated.transparent.indices.len() / 3) as u32;
+        
+        // Combine positions
+        output.positions.extend_from_slice(&separated.opaque.positions);
+        output.positions.extend_from_slice(&separated.transparent.positions);
+        
+        // Combine UVs
+        output.uvs.extend_from_slice(&separated.opaque.uvs);
+        output.uvs.extend_from_slice(&separated.transparent.uvs);
+        
+        // Combine AO
+        output.ao.extend_from_slice(&separated.opaque.ao);
+        output.ao.extend_from_slice(&separated.transparent.ao);
+        
+        // Combine indices (offset transparent indices)
+        output.indices.extend_from_slice(&separated.opaque.indices);
+        output.indices.extend(
+            separated.transparent.indices.iter().map(|i| i + opaque_vert_count)
+        );
+        
+        // Create submesh ranges
+        output.submeshes = vec![
+            SubmeshRange {
+                start_index: 0,
+                index_count: opaque_tri_count * 3,
+                material_type: MaterialType::Opaque,
+            },
+            SubmeshRange {
+                start_index: opaque_tri_count * 3,
+                index_count: transparent_tri_count * 3,
+                material_type: MaterialType::Transparent,
+            },
+        ];
+        
+        // Calculate AABB
+        if !output.positions.is_empty() {
+            let mut min = glam::Vec3::splat(f32::MAX);
+            let mut max = glam::Vec3::splat(f32::MIN);
+            
+            for pos in &output.positions {
+                let p = glam::Vec3::from_array(*pos);
+                min = min.min(p);
+                max = max.max(p);
+            }
+            
+            output.aabb = AABB { min, max };
+        }
+        
+        // Calculate stats
+        output.stats = MeshStats {
+            vertex_count: output.positions.len(),
+            triangle_count: (output.indices.len() / 3),
+            memory_bytes: output.positions.len() * std::mem::size_of::<[f32; 3]>()
+                + output.uvs.len() * std::mem::size_of::<[f32; 2]>()
+                + output.ao.len() * std::mem::size_of::<f32>()
+                + output.indices.len() * std::mem::size_of::<u32>(),
+        };
+        
+        output
+    }
+}
+
 /// Legacy structure for compatibility
 #[derive(Debug, Default)]
 pub struct MeshPosUv {
@@ -199,13 +394,12 @@ fn sample_with_neighbors(
     0 // AIR
 }
 
-/// Calculate ambient occlusion for a vertex
+/// Calculate ambient occlusion for a vertex (4-tap)
 /// Returns a value from 0.0 (fully occluded) to 1.0 (not occluded)
-#[allow(dead_code)]
 fn calculate_ao(side1: bool, side2: bool, corner: bool) -> f32 {
-    // Minecraft-style AO
+    // Minecraft-style AO with 4-tap sampling
     if side1 && side2 {
-        0.0 // Fully occluded
+        0.0 // Fully occluded (both sides block light)
     } else {
         let count = side1 as u8 + side2 as u8 + corner as u8;
         match count {
@@ -213,6 +407,124 @@ fn calculate_ao(side1: bool, side2: bool, corner: bool) -> f32 {
             1 => 0.75,  // Light occlusion
             2 => 0.5,   // Medium occlusion
             _ => 0.25,  // Heavy occlusion
+        }
+    }
+}
+
+/// Calculate AO for all 4 vertices of a quad
+/// Returns [ao0, ao1, ao2, ao3] for each corner
+fn calculate_quad_ao(
+    chunk: &Chunk,
+    neighbors: &[Option<&Chunk>; 6],
+    x: i32,
+    y: i32,
+    z: i32,
+    axis: Axis,
+    dir: Dir,
+) -> [f32; 4] {
+    // Get the 8 surrounding blocks for AO sampling
+    let sample_ao = |dx: i32, dy: i32, dz: i32| -> bool {
+        let block = sample_with_neighbors(chunk, neighbors, x + dx, y + dy, z + dz);
+        block != 0 && !is_transparent(block)
+    };
+    
+    match (axis, dir) {
+        (Axis::Y, Dir::Pos) => {
+            // Top face (+Y) - looking down at face
+            // Corners: (0,0), (1,0), (1,1), (0,1)
+            let v0 = calculate_ao(
+                sample_ao(-1, 1, 0), sample_ao(0, 1, -1), sample_ao(-1, 1, -1)
+            );
+            let v1 = calculate_ao(
+                sample_ao(1, 1, 0), sample_ao(0, 1, -1), sample_ao(1, 1, -1)
+            );
+            let v2 = calculate_ao(
+                sample_ao(1, 1, 0), sample_ao(0, 1, 1), sample_ao(1, 1, 1)
+            );
+            let v3 = calculate_ao(
+                sample_ao(-1, 1, 0), sample_ao(0, 1, 1), sample_ao(-1, 1, 1)
+            );
+            [v0, v1, v2, v3]
+        }
+        (Axis::Y, Dir::Neg) => {
+            // Bottom face (-Y)
+            let v0 = calculate_ao(
+                sample_ao(-1, -1, 0), sample_ao(0, -1, -1), sample_ao(-1, -1, -1)
+            );
+            let v1 = calculate_ao(
+                sample_ao(1, -1, 0), sample_ao(0, -1, -1), sample_ao(1, -1, -1)
+            );
+            let v2 = calculate_ao(
+                sample_ao(1, -1, 0), sample_ao(0, -1, 1), sample_ao(1, -1, 1)
+            );
+            let v3 = calculate_ao(
+                sample_ao(-1, -1, 0), sample_ao(0, -1, 1), sample_ao(-1, -1, 1)
+            );
+            [v0, v1, v2, v3]
+        }
+        (Axis::X, Dir::Pos) => {
+            // East face (+X)
+            let v0 = calculate_ao(
+                sample_ao(1, -1, 0), sample_ao(1, 0, -1), sample_ao(1, -1, -1)
+            );
+            let v1 = calculate_ao(
+                sample_ao(1, -1, 0), sample_ao(1, 0, 1), sample_ao(1, -1, 1)
+            );
+            let v2 = calculate_ao(
+                sample_ao(1, 1, 0), sample_ao(1, 0, 1), sample_ao(1, 1, 1)
+            );
+            let v3 = calculate_ao(
+                sample_ao(1, 1, 0), sample_ao(1, 0, -1), sample_ao(1, 1, -1)
+            );
+            [v0, v1, v2, v3]
+        }
+        (Axis::X, Dir::Neg) => {
+            // West face (-X)
+            let v0 = calculate_ao(
+                sample_ao(-1, -1, 0), sample_ao(-1, 0, -1), sample_ao(-1, -1, -1)
+            );
+            let v1 = calculate_ao(
+                sample_ao(-1, -1, 0), sample_ao(-1, 0, 1), sample_ao(-1, -1, 1)
+            );
+            let v2 = calculate_ao(
+                sample_ao(-1, 1, 0), sample_ao(-1, 0, 1), sample_ao(-1, 1, 1)
+            );
+            let v3 = calculate_ao(
+                sample_ao(-1, 1, 0), sample_ao(-1, 0, -1), sample_ao(-1, 1, -1)
+            );
+            [v0, v1, v2, v3]
+        }
+        (Axis::Z, Dir::Pos) => {
+            // South face (+Z)
+            let v0 = calculate_ao(
+                sample_ao(-1, 0, 1), sample_ao(0, -1, 1), sample_ao(-1, -1, 1)
+            );
+            let v1 = calculate_ao(
+                sample_ao(1, 0, 1), sample_ao(0, -1, 1), sample_ao(1, -1, 1)
+            );
+            let v2 = calculate_ao(
+                sample_ao(1, 0, 1), sample_ao(0, 1, 1), sample_ao(1, 1, 1)
+            );
+            let v3 = calculate_ao(
+                sample_ao(-1, 0, 1), sample_ao(0, 1, 1), sample_ao(-1, 1, 1)
+            );
+            [v0, v1, v2, v3]
+        }
+        (Axis::Z, Dir::Neg) => {
+            // North face (-Z)
+            let v0 = calculate_ao(
+                sample_ao(-1, 0, -1), sample_ao(0, -1, -1), sample_ao(-1, -1, -1)
+            );
+            let v1 = calculate_ao(
+                sample_ao(1, 0, -1), sample_ao(0, -1, -1), sample_ao(1, -1, -1)
+            );
+            let v2 = calculate_ao(
+                sample_ao(1, 0, -1), sample_ao(0, 1, -1), sample_ao(1, 1, -1)
+            );
+            let v3 = calculate_ao(
+                sample_ao(-1, 0, -1), sample_ao(0, 1, -1), sample_ao(-1, 1, -1)
+            );
+            [v0, v1, v2, v3]
         }
     }
 }
@@ -384,7 +696,7 @@ fn greedy_merge_mask(
     }
 }
 
-/// Emit a greedy-merged quad with AO
+/// Emit a greedy-merged quad with configurable AO
 fn emit_greedy_quad(
     mesh: &mut MeshData,
     block_id: BlockId,
@@ -396,6 +708,24 @@ fn emit_greedy_quad(
     axis: Axis,
     dir: Dir,
     atlas: &TextureAtlas,
+) {
+    emit_greedy_quad_with_ao(mesh, block_id, depth, start_u, start_v, width, height, axis, dir, atlas, None, None)
+}
+
+/// Emit a greedy-merged quad with optional AO calculation
+fn emit_greedy_quad_with_ao(
+    mesh: &mut MeshData,
+    block_id: BlockId,
+    depth: i32,
+    start_u: i32,
+    start_v: i32,
+    width: i32,
+    height: i32,
+    axis: Axis,
+    dir: Dir,
+    atlas: &TextureAtlas,
+    chunk: Option<&Chunk>,
+    neighbors: Option<&[Option<&Chunk>; 6]>,
 ) {
     let face_dir = dir.to_face_dir(axis);
     let uvs = atlas.get_uvs(block_id, face_dir);
@@ -464,8 +794,19 @@ fn emit_greedy_quad(
         }
     };
     
-    // Simple AO (1.0 = no occlusion for now, will be calculated properly later)
-    let ao_values = [1.0, 1.0, 1.0, 1.0];
+    // Calculate AO if chunk data is available (configurable)
+    let ao_values = if let (Some(c), Some(n)) = (chunk, neighbors) {
+        // Calculate AO for the first voxel of this quad
+        let (x, y, z) = match axis {
+            Axis::X => (depth, start_u, start_v),
+            Axis::Y => (start_u, depth, start_v),
+            Axis::Z => (start_u, start_v, depth),
+        };
+        calculate_quad_ao(c, n, x, y, z, axis, dir)
+    } else {
+        // No AO (fully lit)
+        [1.0, 1.0, 1.0, 1.0]
+    };
     
     // Add vertices
     let base = mesh.positions.len() as u32;

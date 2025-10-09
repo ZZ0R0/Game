@@ -4,6 +4,7 @@
 // ChunkV2: Modern chunk system with BlockId, palette, dirty flags, and world coordinates
 pub mod chunk;
 pub mod meshing;
+pub mod marching_cubes; // Milestone 3: Density mesher
 pub mod atlas;
 pub mod raycast;
 
@@ -12,6 +13,13 @@ pub mod chunk_ring;
 pub mod job_queue;
 pub mod generator;
 pub mod storage;
+
+// Milestone 1: Unified voxel model
+pub mod voxel_schema;
+pub mod volume;
+
+// Milestone 2: Provider system
+pub mod providers;
 
 // Re-exports
 pub use chunk::{
@@ -32,6 +40,19 @@ pub use meshing::{
     SeparatedMesh,
     greedy_mesh_chunk,
     greedy_mesh_chunk_separated,
+    // Milestone 3 exports
+    MeshBuildOutput,
+    SubmeshRange,
+    MaterialType,
+    AABB,
+    MeshStats,
+};
+
+pub use marching_cubes::{
+    marching_cubes,
+    DensityMesh,
+    DensityMeshConfig,
+    MaterialBlendMode,
 };
 
 pub use atlas::{TextureAtlas, AtlasRect, FaceDir};
@@ -42,3 +63,25 @@ pub use chunk_ring::{ChunkRing, ChunkRingConfig, world_to_chunk, chunk_to_world}
 pub use job_queue::{JobQueue, JobWorker, WorkerHandle, ChunkJob, JobResult};
 pub use generator::{TerrainGenerator, TerrainConfig, Biome};
 pub use storage::{ChunkPool, MeshPool};
+
+// Milestone 1 exports
+pub use voxel_schema::{
+    VoxelSchema, BlockSchema, DensitySchema,
+    MaterialId, Density,
+    MAT_AIR, MAT_STONE, MAT_DIRT, MAT_GRASS, MAT_WOOD, MAT_WATER,
+};
+pub use volume::{
+    Volume, GridVolume, CelestialVolume,
+    VolumeTransform, DirtyRegions, ProceduralProvider,
+    world_to_chunk_pos,
+};
+
+// Milestone 2 exports
+pub use providers::{
+    VoxelProvider, VoxelValue, VoxelData, Brush, BrushShape,
+    ProviderError, GridStoreProvider, GridStoreConfig, ChunkData,
+    PlanetProvider, PlanetConfig, NoiseLayer, BiomeBand, BiomeType,
+    AsteroidProvider, AsteroidConfig, NoiseMode, NoiseParams,
+    DeltaStore, DeltaStats, GCConfig, EvictionPolicy,
+    ProviderWithEdits,
+};
