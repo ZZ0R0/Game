@@ -8,3 +8,4 @@ engine_core = { path = "../engine_core" }
 render_wgpu = { path = "../render_wgpu" }
 voxel_engine = { path = "../voxel_engine" }
 glam = "0.27"
+bytemuck = "1.14"

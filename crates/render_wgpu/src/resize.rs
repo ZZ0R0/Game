@@ -74,6 +74,16 @@ impl<'w> Gfx<'w> {
 
     pub fn set_model(&mut self, m: glam::Mat4) { self.model = m; self.write_object(); }
     pub fn set_tint_rgba(&mut self, rgba: [f32; 4]) { self.tint = rgba; self.write_object(); }
+    
+    /// Get the current view-projection matrix for frustum culling
+    pub fn get_vp_matrix(&self) -> glam::Mat4 {
+        let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
+        let view = glam::Mat4::look_at_rh(self.cam_eye, self.cam_target, Vec3::Y);
+        let fov_degrees: f32 = 150.0;
+        let fov_radians = fov_degrees.to_radians();
+        let proj = glam::Mat4::perspective_rh(fov_radians, aspect, 0.01, 100.0);
+        proj * view
+    }
 
     pub(crate) fn write_camera(&mut self) {
         let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);

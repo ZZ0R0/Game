@@ -31,6 +31,20 @@ impl<'w> Gfx<'w> {
                         ui.separator();
                         ui.label(format!("FPS: {:.1}", fps));
                     }
+                    
+                    // NEW: Render statistics
+                    let stats = &self.chunk_renderer.stats;
+                    if stats.total_chunks > 0 {
+                        ui.separator();
+                        ui.label(format!("Chunks: {}/{}", stats.visible_chunks, stats.total_chunks));
+                        ui.separator();
+                        ui.label(format!("Triangles: {}K", stats.rendered_triangles / 1000));
+                        ui.separator();
+                        ui.label(format!("Drawcalls: {}", stats.draw_calls));
+                        ui.separator();
+                        ui.label(format!("Culled: {}", stats.culled_chunks));
+                    }
+                    
                     if let Some(name) = &self.last_img {
                         ui.separator();
                         ui.label(format!("Texture: {}", name));
@@ -109,16 +123,30 @@ impl<'w> Gfx<'w> {
                     rp.set_bind_group(1, &self.tex_bg, &[]);
                     rp.set_bind_group(2, &self.obj_bg, &[]);
                     
-                    // Draw voxel mesh if available
-                    if let Some(mesh) = voxel_mesh {
-                        rp.set_vertex_buffer(0, mesh.vbuf.slice(..));
-                        rp.set_index_buffer(mesh.ibuf.slice(..), crate::wgpu::IndexFormat::Uint32);
-                        rp.draw_indexed(0..mesh.index_count, 0, 0..1);
-                    } else {
-                        // Fallback to default quad
-                        rp.set_vertex_buffer(0, self.vbuf.slice(..));
-                        rp.set_index_buffer(self.ibuf.slice(..), crate::wgpu::IndexFormat::Uint16);
-                        rp.draw_indexed(0..self.index_count, 0, 0..1);
+                    // NEW: Render chunks with frustum culling
+                    let vp_matrix = self.get_vp_matrix();
+                    let visible_chunks = self.chunk_renderer.cull_chunks(vp_matrix);
+                    
+                    // Draw each visible chunk
+                    for chunk_pos in visible_chunks {
+                        if let Some(mesh) = self.chunk_renderer.get_mesh(chunk_pos) {
+                            rp.set_vertex_buffer(0, mesh.vbuf.slice(..));
+                            rp.set_index_buffer(mesh.ibuf.slice(..), crate::wgpu::IndexFormat::Uint32);
+                            rp.draw_indexed(0..mesh.index_count, 0, 0..1);
+                        }
+                    }
+                    
+                    // Fallback: if no chunks, draw default quad
+                    if self.chunk_renderer.meshes.is_empty() {
+                        if let Some(mesh) = voxel_mesh {
+                            rp.set_vertex_buffer(0, mesh.vbuf.slice(..));
+                            rp.set_index_buffer(mesh.ibuf.slice(..), crate::wgpu::IndexFormat::Uint32);
+                            rp.draw_indexed(0..mesh.index_count, 0, 0..1);
+                        } else {
+                            rp.set_vertex_buffer(0, self.vbuf.slice(..));
+                            rp.set_index_buffer(self.ibuf.slice(..), crate::wgpu::IndexFormat::Uint16);
+                            rp.draw_indexed(0..self.index_count, 0, 0..1);
+                        }
                     }
                 }
             }

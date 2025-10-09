@@ -8,6 +8,9 @@ pub use framegraph::FrameGraph;
 
 pub mod gfx; // Gfx struct + core types
 pub mod mesh_upload;    // upload vertex/index buffers
+pub mod frustum;        // frustum culling for chunks
+pub mod buffer_pool;    // GPU buffer recycling pool
+pub mod chunk_renderer; // per-chunk rendering system
 
 mod texture;          // depth RT + simple textures + uploads
 mod pipeline;         // shader + pipeline creation helpers

@@ -25,4 +25,9 @@ impl<'w> Gfx<'w> {
         });
         MeshBuffers { vbuf, ibuf, index_count: indices.len() as u32 }
     }
+    
+    /// Upload a chunk mesh to the ChunkRenderer
+    pub fn upload_chunk(&mut self, position: glam::IVec3, vertices: &[u8], indices: &[u32]) {
+        self.chunk_renderer.insert_chunk(&self.device, position, vertices, indices);
+    }
 }

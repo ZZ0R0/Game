@@ -63,6 +63,9 @@ pub struct Gfx<'w> {
     // object state
     pub(crate) model: Mat4,
     pub(crate) tint: [f32; 4],
+    
+    // chunk rendering
+    pub chunk_renderer: crate::chunk_renderer::ChunkRenderer,
 }
 
 #[derive(Clone)]
@@ -378,6 +381,7 @@ impl<'w> Gfx<'w> {
             hud_fps: None,
             model,
             tint,
+            chunk_renderer: crate::chunk_renderer::ChunkRenderer::new(32.0),
         };
         gfx.write_camera();
         gfx.write_object();

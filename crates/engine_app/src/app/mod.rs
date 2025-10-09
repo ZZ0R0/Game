@@ -1,17 +1,17 @@
 use std::time::{Duration, Instant};
 
 use engine_core::Engine;
-use glam::Mat4;
+use glam::{Mat4, IVec3};
 use render_wgpu::{wgpu, FrameGraph};
 use render_wgpu::gfx::Gfx;
 use render_wgpu::winit as rwinit;
 
-use voxel_engine::{Chunk, mesh_chunk};
+use voxel_engine::{ChunkManager, Chunk, mesh_chunk, STONE, GRASS, DIRT, WOOD};
 use render_wgpu::mesh_upload::MeshBuffers;
 
 use rwinit::{
     application::ApplicationHandler,
-    event::{ElementState, MouseScrollDelta, StartCause, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, MouseScrollDelta, StartCause, WindowEvent},
     event_loop::ActiveEventLoop,
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
@@ -19,6 +19,12 @@ use rwinit::{
 
 mod state;
 use state::Input;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlMode {
+    Game,    // FPS mode: cursor locked, camera rotation
+    UI,      // UI mode: cursor visible, can interact with menus
+}
 
 pub struct App {
     window: Option<&'static Window>,
@@ -37,8 +43,13 @@ pub struct App {
     rot_on: bool,
     angle: f32,
 
-    // voxel mesh
+    // Voxel world
+    chunk_manager: ChunkManager,
     voxel_mesh: Option<MeshBuffers>,
+    
+    // Control mode
+    control_mode: ControlMode,
+    fullscreen: bool,
 }
 
 impl App {
@@ -57,7 +68,49 @@ impl App {
             last_fps_t: Instant::now(),
             rot_on: true,
             angle: 0.0,
+            chunk_manager: ChunkManager::new(),
             voxel_mesh: None,
+            control_mode: ControlMode::UI,  // Start in UI mode
+            fullscreen: false,
+        }
+    }
+    
+    fn set_control_mode(&mut self, mode: ControlMode) {
+        if self.control_mode == mode {
+            return;
+        }
+        self.control_mode = mode;
+        
+        if let Some(window) = self.window {
+            match mode {
+                ControlMode::Game => {
+                    // Lock cursor and hide it for FPS mode
+                    if let Err(e) = window.set_cursor_grab(rwinit::window::CursorGrabMode::Locked) {
+                        eprintln!("Failed to lock cursor: {}", e);
+                    }
+                    window.set_cursor_visible(false);
+                    println!("Switched to GAME mode (cursor locked)");
+                }
+                ControlMode::UI => {
+                    // Release cursor and show it for UI mode
+                    let _ = window.set_cursor_grab(rwinit::window::CursorGrabMode::None);
+                    window.set_cursor_visible(true);
+                    println!("Switched to UI mode (cursor visible)");
+                }
+            }
+        }
+    }
+    
+    fn toggle_fullscreen(&mut self) {
+        if let Some(window) = self.window {
+            self.fullscreen = !self.fullscreen;
+            if self.fullscreen {
+                window.set_fullscreen(Some(rwinit::window::Fullscreen::Borderless(None)));
+                println!("Fullscreen: ON");
+            } else {
+                window.set_fullscreen(None);
+                println!("Fullscreen: OFF");
+            }
         }
     }
 }
@@ -68,57 +121,167 @@ impl Default for App {
     }
 }
 
+impl App {
+    /// Generate a test world with terrain
+    fn generate_test_world(&mut self) {
+        println!("Generating test world...");
+        
+        // Create a 8x8 grid of chunks (64 chunks) for better culling demo
+        let radius = 4;
+        for x in -radius..radius {
+            for z in -radius..radius {
+                let pos = IVec3::new(x, 0, z);
+                let mut chunk = Chunk::new(pos);
+                
+                // Generate terrain
+                let size = 32;
+                for cz in 0..size {
+                    for cx in 0..size {
+                        // World coordinates
+                        let wx = pos.x * size as i32 + cx as i32;
+                        let wz = pos.z * size as i32 + cz as i32;
+                        
+                        // More varied height map
+                        let height = (10.0 
+                            + 5.0 * (wx as f32 * 0.05).sin() 
+                            + 4.0 * (wz as f32 * 0.08).cos()
+                            + 3.0 * (wx as f32 * 0.12).sin() * (wz as f32 * 0.09).cos()
+                        ) as usize;
+                        
+                        for cy in 0..size {
+                            if cy < height.saturating_sub(4) {
+                                chunk.set(cx, cy, cz, STONE);
+                            } else if cy < height {
+                                chunk.set(cx, cy, cz, DIRT);
+                            } else if cy == height {
+                                chunk.set(cx, cy, cz, GRASS);
+                            }
+                        }
+                    }
+                }
+                
+                // Add some trees randomly
+                if (x + z) % 3 == 0 {
+                    // Tree at center
+                    for y in 12..17 {
+                        chunk.set(16, y, 16, WOOD);
+                    }
+                    // Leaves
+                    for dy in 0..3 {
+                        for dx in -2..=2 {
+                            for dz in -2..=2 {
+                                let lx = (16i32 + dx) as usize;
+                                let lz = (16i32 + dz) as usize;
+                                let ly = 17 + dy;
+                                if lx < 32 && lz < 32 && ly < 32 {
+                                    chunk.set(lx, ly, lz, GRASS); // Using GRASS as leaves
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                self.chunk_manager.insert(chunk);
+            }
+        }
+        
+        println!("✓ Generated {} chunks", self.chunk_manager.chunk_count());
+        println!("✓ Memory: {:.2} MiB", 
+                 self.chunk_manager.total_memory_usage() as f64 / 1024.0 / 1024.0);
+    }
+    
+    /// Generate mesh for all dirty chunks
+    fn update_dirty_chunks(&mut self) {
+        let dirty_chunks = self.chunk_manager.get_dirty_chunks();
+        if dirty_chunks.is_empty() {
+            return;
+        }
+        
+        println!("Updating {} dirty chunks...", dirty_chunks.len());
+        
+        if let Some(g) = self.gfx.as_mut() {
+            for chunk_pos in &dirty_chunks {
+                if let Some(chunk) = self.chunk_manager.get_chunk(*chunk_pos) {
+                    let mesh = mesh_chunk(chunk);
+                    
+                    // Convert to vertex bytes (VertexTex format)
+                    use bytemuck::cast_slice;
+                    
+                    #[repr(C)]
+                    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+                    struct VertexTex {
+                        pos: [f32; 3],
+                        uv: [f32; 2],
+                    }
+                    
+                    let vertices: Vec<VertexTex> = mesh.positions.iter().zip(mesh.uvs.iter())
+                        .map(|(p, u)| {
+                            // Offset to world coordinates
+                            let offset_x = chunk_pos.x as f32 * 32.0;
+                            let offset_y = chunk_pos.y as f32 * 32.0;
+                            let offset_z = chunk_pos.z as f32 * 32.0;
+                            
+                            VertexTex {
+                                pos: [p[0] + offset_x, p[1] + offset_y, p[2] + offset_z],
+                                uv: *u,
+                            }
+                        })
+                        .collect();
+                    
+                    let vertex_bytes: &[u8] = cast_slice(&vertices);
+                    
+                    // Upload chunk to ChunkRenderer
+                    g.upload_chunk(*chunk_pos, vertex_bytes, &mesh.indices);
+                }
+                
+                self.chunk_manager.clear_dirty(*chunk_pos);
+            }
+            
+            let stats = &g.chunk_renderer.stats;
+            println!("✓ ChunkRenderer: {} chunks, {} triangles total",
+                     stats.total_chunks,
+                     stats.total_triangles);
+        }
+    }
+}
+
 impl ApplicationHandler for App {
     fn new_events(&mut self, _el: &ActiveEventLoop, _cause: StartCause) {}
 
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.window.is_none() {
-            let attrs = Window::default_attributes().with_title("Dev Engine");
+            let attrs = Window::default_attributes().with_title("Dev Engine - Click to play");
             let window = el.create_window(attrs).expect("create_window");
             let window_ref: &'static Window = Box::leak(Box::new(window));
+            
+            // Start in UI mode (cursor visible)
+            // Player will click to enter Game mode
+            
             let mut gfx = Gfx::new(window_ref);
             let _ = gfx.enable_shader_hot_reload("crates/render_wgpu/assets/shader.wgsl");
             self.window = Some(window_ref);
             self.gfx = Some(gfx);
-            // Build a GPU stress test: combine multiple chunks for 65k+ voxels
-            let mut combined_positions = Vec::new();
-            let mut combined_uvs = Vec::new();
-            let mut combined_indices = Vec::new();
             
-            // Create 2x2 grid of chunks (4 chunks = 131,072 voxels max)
-            for chunk_x in 0..2 {
-                for chunk_z in 0..2 {
-                    let mut c = Chunk::new_empty();
-                    c.fill_gpu_stress_test();
-                    let mesh = mesh_chunk(&c);
-                    
-                    let offset_x = chunk_x as f32 * 32.0;
-                    let offset_z = chunk_z as f32 * 32.0;
-                    let base_index = combined_positions.len() as u32;
-                    
-                    // Add vertices with offset
-                    for pos in &mesh.positions {
-                        combined_positions.push([pos[0] + offset_x, pos[1], pos[2] + offset_z]);
-                    }
-                    combined_uvs.extend_from_slice(&mesh.uvs);
-                    
-                    // Add indices with offset
-                    for idx in &mesh.indices {
-                        combined_indices.push(idx + base_index);
-                    }
+            // Generate test world
+            self.generate_test_world();
+            
+            // Generate meshes for all chunks
+            self.update_dirty_chunks();
+        }
+    }
+
+    fn device_event(&mut self, _el: &ActiveEventLoop, _device_id: DeviceId, event: DeviceEvent) {
+        // Handle raw mouse motion for camera rotation (only in Game mode)
+        if self.control_mode == ControlMode::Game {
+            if let DeviceEvent::MouseMotion { delta } = event {
+                if let (Some(g), Some(w)) = (self.gfx.as_mut(), self.window) {
+                    let sensitivity = 0.003;
+                    let dx = delta.0 as f32 * sensitivity;
+                    let dy = -(delta.1 as f32) * sensitivity;
+                    g.rotate_camera(dx, dy);
+                    w.request_redraw();
                 }
             }
-            
-            println!("Combined voxel mesh: {} vertices, {} indices ({} triangles)", 
-                     combined_positions.len(), 
-                     combined_indices.len(),
-                     combined_indices.len() / 3);
-            
-            if let Some(g) = self.gfx.as_ref() {
-                let mb = g.upload_pos_uv(&combined_positions, &combined_uvs, &combined_indices);
-                self.voxel_mesh = Some(mb);
-            }
-
         }
     }
 
@@ -146,9 +309,28 @@ impl ApplicationHandler for App {
                         match code {
                             KeyCode::KeyV => { if let Some(g) = self.gfx.as_mut() { g.toggle_vsync(); } }
                             KeyCode::KeyR => { self.rot_on = !self.rot_on; }
+                            KeyCode::Escape => {
+                                // ESC toggles between Game and UI mode
+                                match self.control_mode {
+                                    ControlMode::Game => self.set_control_mode(ControlMode::UI),
+                                    ControlMode::UI => el.exit(),  // ESC in UI mode = quit
+                                }
+                            }
+                            KeyCode::F11 => {
+                                // F11 toggles fullscreen
+                                self.toggle_fullscreen();
+                            }
                             _ => {}
                         }
                     }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                // Click to enter Game mode from UI mode
+                if state == ElementState::Pressed 
+                   && button == rwinit::event::MouseButton::Left
+                   && self.control_mode == ControlMode::UI {
+                    self.set_control_mode(ControlMode::Game);
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -158,20 +340,6 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::PixelDelta(p) => (p.y as f32) / 120.0,
                     };
                     g.zoom(-0.5 * dy);
-                    w.request_redraw();
-                }
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                if let (Some(g), Some(w)) = (self.gfx.as_mut(), self.window) {
-                    if self.input.rmb_down {
-                        if let Some(prev) = self.input.last_cursor {
-                            let sensitivity = 0.003;  // Augmenté de 0.0003 à 0.003
-                            let dx = (position.x - prev.x) as f32 * sensitivity;
-                            let dy = -(position.y - prev.y) as f32 * sensitivity;  // INVERSÉ pour contrôle naturel
-                            g.rotate_camera(dx, dy);
-                        }
-                    }
-                    self.input.last_cursor = Some(position);
                     w.request_redraw();
                 }
             }
@@ -207,12 +375,13 @@ impl ApplicationHandler for App {
         let now = Instant::now();
         while now >= self.next_tick {
             if let Some(g) = self.gfx.as_mut() {
-                // WASD/EQ camera movement in 3D
+                // WASD camera movement in 3D
+                // Space to go up, C to go down
                 let speed = 3.0 * self.dt.as_secs_f32();
                 
                 let forward = (self.input.held(KeyCode::KeyW) as i32 - self.input.held(KeyCode::KeyS) as i32) as f32;
                 let right = (self.input.held(KeyCode::KeyD) as i32 - self.input.held(KeyCode::KeyA) as i32) as f32;
-                let up = (self.input.held(KeyCode::KeyE) as i32 - self.input.held(KeyCode::KeyQ) as i32) as f32;
+                let up = (self.input.held(KeyCode::Space) as i32 - self.input.held(KeyCode::KeyC) as i32) as f32;
                 
                 if forward != 0.0 || right != 0.0 || up != 0.0 {
                     g.move_camera(forward * speed, right * speed, up * speed);
