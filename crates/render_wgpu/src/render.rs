@@ -128,8 +128,8 @@ impl<'w> Gfx<'w> {
                     let visible_chunks = self.chunk_renderer.cull_chunks(vp_matrix);
                     
                     // Draw each visible chunk
-                    for chunk_pos in visible_chunks {
-                        if let Some(mesh) = self.chunk_renderer.get_mesh(chunk_pos) {
+                    for chunk_pos in &visible_chunks {
+                        if let Some(mesh) = self.chunk_renderer.get_mesh(*chunk_pos) {
                             rp.set_vertex_buffer(0, mesh.vbuf.slice(..));
                             rp.set_index_buffer(mesh.ibuf.slice(..), crate::wgpu::IndexFormat::Uint32);
                             rp.draw_indexed(0..mesh.index_count, 0, 0..1);

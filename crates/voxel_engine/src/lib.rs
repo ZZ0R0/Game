@@ -5,6 +5,13 @@
 pub mod chunk;
 pub mod meshing;
 pub mod atlas;
+pub mod raycast;
+
+// New: Chunk loading system with async generation
+pub mod chunk_ring;
+pub mod job_queue;
+pub mod generator;
+pub mod storage;
 
 // Re-exports
 pub use chunk::{
@@ -28,3 +35,10 @@ pub use meshing::{
 };
 
 pub use atlas::{TextureAtlas, AtlasRect, FaceDir};
+
+pub use raycast::{raycast_dda, RaycastHit};
+
+pub use chunk_ring::{ChunkRing, ChunkRingConfig, world_to_chunk, chunk_to_world};
+pub use job_queue::{JobQueue, JobWorker, WorkerHandle, ChunkJob, JobResult};
+pub use generator::{TerrainGenerator, TerrainConfig, Biome};
+pub use storage::{ChunkPool, MeshPool};

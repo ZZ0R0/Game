@@ -4,7 +4,7 @@ use crate::atlas::{TextureAtlas, FaceDir};
 use glam::IVec3;
 
 /// Mesh data with position, UV, and AO
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
@@ -49,6 +49,22 @@ pub fn mesh_chunk_v2(chunk: &Chunk) -> MeshPosUv {
         }
     }
     m
+}
+
+/// Mesh function that returns MeshData (with AO support)
+pub fn mesh_chunk_with_ao(chunk: &Chunk) -> MeshData {
+    let legacy = mesh_chunk_v2(chunk);
+    
+    // Count positions before move
+    let ao_count = legacy.positions.len();
+    
+    // Convert to MeshData with default AO (1.0 = fully lit)
+    MeshData {
+        positions: legacy.positions,
+        uvs: legacy.uvs,
+        ao: vec![1.0; ao_count],
+        indices: legacy.indices,
+    }
 }
 
 #[inline]
@@ -153,33 +169,34 @@ fn sample_with_neighbors(
     }
     
     // Check neighbors: [+X, -X, +Y, -Y, +Z, -Z]
-    if x >= size {
+    if x >= size && y >= 0 && y < size && z >= 0 && z < size {
         if let Some(n) = neighbors[0] {
             return n.get(0, y as usize, z as usize);
         }
-    } else if x < 0 {
+    } else if x < 0 && y >= 0 && y < size && z >= 0 && z < size {
         if let Some(n) = neighbors[1] {
             return n.get((size - 1) as usize, y as usize, z as usize);
         }
-    } else if y >= size {
+    } else if y >= size && x >= 0 && x < size && z >= 0 && z < size {
         if let Some(n) = neighbors[2] {
             return n.get(x as usize, 0, z as usize);
         }
-    } else if y < 0 {
+    } else if y < 0 && x >= 0 && x < size && z >= 0 && z < size {
         if let Some(n) = neighbors[3] {
             return n.get(x as usize, (size - 1) as usize, z as usize);
         }
-    } else if z >= size {
+    } else if z >= size && x >= 0 && x < size && y >= 0 && y < size {
         if let Some(n) = neighbors[4] {
             return n.get(x as usize, y as usize, 0);
         }
-    } else if z < 0 {
+    } else if z < 0 && x >= 0 && x < size && y >= 0 && y < size {
         if let Some(n) = neighbors[5] {
             return n.get(x as usize, y as usize, (size - 1) as usize);
         }
     }
     
-    0 // Default to AIR
+    // Out of all neighbor bounds
+    0 // AIR
 }
 
 /// Calculate ambient occlusion for a vertex

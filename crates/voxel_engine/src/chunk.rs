@@ -60,7 +60,7 @@ impl DirtyFlags {
 
 /// Chunk with BlockId palette system
 /// Memory: 32³ × 2 bytes = 65,536 bytes = 64 KiB
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Chunk {
     /// World position of this chunk (in chunk coordinates)
     pub position: IVec3,
@@ -103,6 +103,10 @@ impl Chunk {
     /// Get block at local coordinates (0..31)
     #[inline]
     pub fn get(&self, x: usize, y: usize, z: usize) -> BlockId {
+        // Bounds check (critical in release mode!)
+        if x >= CHUNK_SIZE || y >= CHUNK_SIZE || z >= CHUNK_SIZE {
+            return AIR; // Return air for out of bounds access
+        }
         debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
         self.blocks[Self::index(x, y, z)]
     }
@@ -273,13 +277,41 @@ impl ChunkManager {
     }
     
     /// Set block at world coordinates
+    /// Marks the chunk as dirty for mesh regeneration
+    /// Also marks neighbor chunks dirty if the block is at a chunk boundary
     pub fn set_block(&mut self, world_pos: IVec3, block: BlockId) -> bool {
         let chunk_pos = Self::world_to_chunk(world_pos);
-        if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+        
+        // Set the block in the main chunk
+        let success = if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
             chunk.set_world(world_pos, block)
         } else {
             false
+        };
+        
+        if !success {
+            return false;
         }
+        
+        // Check if the block is at a chunk boundary
+        // If so, mark neighbor chunks as dirty too (for proper mesh updates)
+        let local_pos = world_pos - chunk_pos * CHUNK_SIZE as i32;
+        
+        let is_boundary_x = local_pos.x == 0 || local_pos.x == (CHUNK_SIZE as i32 - 1);
+        let is_boundary_y = local_pos.y == 0 || local_pos.y == (CHUNK_SIZE as i32 - 1);
+        let is_boundary_z = local_pos.z == 0 || local_pos.z == (CHUNK_SIZE as i32 - 1);
+        
+        if is_boundary_x || is_boundary_y || is_boundary_z {
+            // Mark adjacent neighbors as dirty
+            let neighbors = Self::get_adjacent_neighbors(chunk_pos);
+            for neighbor_pos in neighbors {
+                if let Some(neighbor_chunk) = self.chunks.get_mut(&neighbor_pos) {
+                    neighbor_chunk.dirty.mesh = true;
+                }
+            }
+        }
+        
+        true
     }
     
     /// Convert world coordinates to chunk coordinates
@@ -342,6 +374,35 @@ impl ChunkManager {
     /// Get total memory usage
     pub fn total_memory_usage(&self) -> usize {
         self.chunks.values().map(|c| c.memory_usage()).sum()
+    }
+    
+    /// Perform a raycast through the voxel world
+    /// 
+    /// # Arguments
+    /// * `origin` - Ray start position in world coordinates
+    /// * `direction` - Ray direction (will be normalized)
+    /// * `max_distance` - Maximum ray distance
+    /// 
+    /// # Returns
+    /// `Some(RaycastHit)` if a solid block is hit, `None` otherwise
+    pub fn raycast(&self, origin: glam::Vec3, direction: glam::Vec3, max_distance: f32) -> Option<crate::raycast::RaycastHit> {
+        let direction = direction.normalize();
+        
+        crate::raycast::raycast_dda(
+            origin,
+            direction,
+            max_distance,
+            |world_pos| {
+                // Get block at world position
+                Some(self.get_block(world_pos))
+            }
+        )
+    }
+    
+    /// Create a ray from camera position and direction
+    /// Useful for mouse picking
+    pub fn camera_ray(camera_pos: glam::Vec3, camera_forward: glam::Vec3) -> (glam::Vec3, glam::Vec3) {
+        (camera_pos, camera_forward.normalize())
     }
 }
 

@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use engine_core::Engine;
 use glam::{Mat4, IVec3};
@@ -6,7 +7,11 @@ use render_wgpu::{wgpu, FrameGraph};
 use render_wgpu::gfx::Gfx;
 use render_wgpu::winit as rwinit;
 
-use voxel_engine::{ChunkManager, Chunk, mesh_chunk, STONE, GRASS, DIRT, WOOD};
+use voxel_engine::{
+    ChunkManager, mesh_chunk, STONE, AIR,
+    ChunkRing, ChunkRingConfig, JobQueue, JobWorker, WorkerHandle, ChunkJob, JobResult,
+    TerrainGenerator, ChunkPool, MeshPool,
+};
 use render_wgpu::mesh_upload::MeshBuffers;
 
 use rwinit::{
@@ -43,8 +48,14 @@ pub struct App {
     rot_on: bool,
     angle: f32,
 
-    // Voxel world
+    // Voxel world - NEW SYSTEM
     chunk_manager: ChunkManager,
+    chunk_ring: ChunkRing,
+    job_queue: Arc<JobQueue>,
+    terrain_generator: TerrainGenerator,
+    chunk_pool: ChunkPool,
+    mesh_pool: MeshPool,
+    worker_handle: Option<WorkerHandle>,
     voxel_mesh: Option<MeshBuffers>,
     
     // Control mode
@@ -54,6 +65,18 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        // Create job queue and start workers
+        let job_queue = Arc::new(JobQueue::new());
+        let worker = JobWorker::new(Arc::clone(&job_queue), 4); // 4 worker threads
+        let worker_handle = worker.start();
+        
+        // Configure chunk ring
+        let ring_config = ChunkRingConfig {
+            view_radius: 8,
+            generation_radius: 10,
+            unload_radius: 12,
+        };
+        
         Self {
             window: None,
             gfx: None,
@@ -69,6 +92,12 @@ impl App {
             rot_on: true,
             angle: 0.0,
             chunk_manager: ChunkManager::new(),
+            chunk_ring: ChunkRing::new(ring_config),
+            job_queue,
+            terrain_generator: TerrainGenerator::default(),
+            chunk_pool: ChunkPool::new(512),
+            mesh_pool: MeshPool::new(512),
+            worker_handle: Some(worker_handle),
             voxel_mesh: None,
             control_mode: ControlMode::UI,  // Start in UI mode
             fullscreen: false,
@@ -122,72 +151,151 @@ impl Default for App {
 }
 
 impl App {
-    /// Generate a test world with terrain
-    fn generate_test_world(&mut self) {
-        println!("Generating test world...");
-        
-        // Create a 8x8 grid of chunks (64 chunks) for better culling demo
-        let radius = 4;
-        for x in -radius..radius {
-            for z in -radius..radius {
-                let pos = IVec3::new(x, 0, z);
-                let mut chunk = Chunk::new(pos);
-                
-                // Generate terrain
-                let size = 32;
-                for cz in 0..size {
-                    for cx in 0..size {
-                        // World coordinates
-                        let wx = pos.x * size as i32 + cx as i32;
-                        let wz = pos.z * size as i32 + cz as i32;
-                        
-                        // More varied height map
-                        let height = (10.0 
-                            + 5.0 * (wx as f32 * 0.05).sin() 
-                            + 4.0 * (wz as f32 * 0.08).cos()
-                            + 3.0 * (wx as f32 * 0.12).sin() * (wz as f32 * 0.09).cos()
-                        ) as usize;
-                        
-                        for cy in 0..size {
-                            if cy < height.saturating_sub(4) {
-                                chunk.set(cx, cy, cz, STONE);
-                            } else if cy < height {
-                                chunk.set(cx, cy, cz, DIRT);
-                            } else if cy == height {
-                                chunk.set(cx, cy, cz, GRASS);
-                            }
-                        }
+    /// Update chunk loading based on camera position (NEW SYSTEM)
+    fn update_chunk_loading(&mut self) {
+        if let Some(g) = self.gfx.as_ref() {
+            let cam_pos = g.cam_eye;
+            
+            // Update chunk ring to find which chunks to load/unload
+            let (to_load, to_unload) = self.chunk_ring.update(cam_pos);
+            
+            // Unload chunks that are too far
+            for chunk_pos in to_unload {
+                if let Some(chunk) = self.chunk_manager.remove(chunk_pos) {
+                    // Return chunk to pool for reuse
+                    self.chunk_pool.release(chunk);
+                    self.chunk_ring.mark_unloaded(chunk_pos);
+                    
+                    // Also remove from renderer
+                    if let Some(gfx) = self.gfx.as_mut() {
+                        gfx.chunk_renderer.remove_chunk(chunk_pos);
                     }
                 }
+            }
+            
+            // Queue generation jobs for new chunks
+            for chunk_pos in to_load {
+                // Create generation job
+                let chunk = self.terrain_generator.generate_chunk(chunk_pos);
                 
-                // Add some trees randomly
-                if (x + z) % 3 == 0 {
-                    // Tree at center
-                    for y in 12..17 {
-                        chunk.set(16, y, 16, WOOD);
-                    }
-                    // Leaves
-                    for dy in 0..3 {
-                        for dx in -2..=2 {
-                            for dz in -2..=2 {
-                                let lx = (16i32 + dx) as usize;
-                                let lz = (16i32 + dz) as usize;
-                                let ly = 17 + dy;
-                                if lx < 32 && lz < 32 && ly < 32 {
-                                    chunk.set(lx, ly, lz, GRASS); // Using GRASS as leaves
-                                }
-                            }
-                        }
-                    }
-                }
+                // Insert into chunk manager
+                self.chunk_manager.insert(chunk.clone());
+                self.chunk_ring.mark_loaded(chunk_pos);
                 
-                self.chunk_manager.insert(chunk);
+                // Queue meshing job
+                self.job_queue.push(ChunkJob::Mesh {
+                    position: chunk_pos,
+                    chunk: Arc::new(chunk),
+                });
             }
         }
+    }
+    
+    /// Process completed jobs from worker threads
+    fn process_completed_jobs(&mut self) {
+        let results = self.job_queue.drain_completed();
+        if !results.is_empty() {
         
-        println!("✓ Generated {} chunks", self.chunk_manager.chunk_count());
-        println!("✓ Memory: {:.2} MiB", 
-                 self.chunk_manager.total_memory_usage() as f64 / 1024.0 / 1024.0);
+        for result in &results {
+            match result {
+                JobResult::Generated { position, chunk } => {
+                    // Chunk generated, insert into manager
+                    self.chunk_manager.insert(chunk.clone());
+                    self.chunk_ring.mark_loaded(*position);
+                    
+                    // Queue meshing
+                    self.job_queue.push(ChunkJob::Mesh {
+                        position: *position,
+                        chunk: Arc::new((*chunk).clone()),
+                    });
+                }
+                
+                JobResult::Meshed { position, mesh } => {
+                    // Mesh generated, upload to GPU
+                    self.upload_chunk_mesh(*position, mesh.clone());
+                }
+                
+                JobResult::Uploaded { position: _ } => {
+                    // Upload complete (handled by upload_chunk_mesh)
+                }
+                
+                JobResult::PhysicsReady { position: _ } => {
+                    // Physics complete (future)
+                }
+            }
+        }
+        }
+    }
+    
+    /// Upload a chunk mesh to the GPU
+    fn upload_chunk_mesh(&mut self, position: IVec3, mesh: voxel_engine::MeshData) {
+        if let Some(g) = self.gfx.as_mut() {
+            // Convert to vertex bytes (VertexTex format)
+            use bytemuck::cast_slice;
+            
+            #[repr(C)]
+            #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+            struct VertexTex {
+                pos: [f32; 3],
+                uv: [f32; 2],
+            }
+            
+            let vertices: Vec<VertexTex> = mesh.positions.iter().zip(mesh.uvs.iter())
+                .map(|(p, u)| {
+                    // Offset to world coordinates
+                    let offset_x = position.x as f32 * 32.0;
+                    let offset_y = position.y as f32 * 32.0;
+                    let offset_z = position.z as f32 * 32.0;
+                    
+                    VertexTex {
+                        pos: [p[0] + offset_x, p[1] + offset_y, p[2] + offset_z],
+                        uv: *u,
+                    }
+                })
+                .collect();
+            
+            let vertex_bytes: &[u8] = cast_slice(&vertices);
+            
+            // Upload to ChunkRenderer
+            g.upload_chunk(position, vertex_bytes, &mesh.indices);
+        }
+    }
+    
+    /// Handle voxel picking with mouse clicks
+    fn handle_voxel_picking(&mut self, button: rwinit::event::MouseButton) {
+        if let Some(g) = self.gfx.as_ref() {
+            // Get camera position and forward direction
+            let cam_pos = g.cam_eye;
+            let cam_target = g.cam_target;
+            let cam_forward = (cam_target - cam_pos).normalize();
+            
+            // Perform raycast
+            let max_distance = 100.0;
+            if let Some(hit) = self.chunk_manager.raycast(cam_pos, cam_forward, max_distance) {
+                match button {
+                    rwinit::event::MouseButton::Left => {
+                        // Left click: REMOVE block (mine)
+                        println!("⛏️ Mining block at {:?} (was {:?})", hit.position, hit.block_id);
+                        self.chunk_manager.set_block(hit.position, AIR);
+                        
+                        // Update dirty chunks
+                        self.update_dirty_chunks();
+                    }
+                    rwinit::event::MouseButton::Right => {
+                        // Right click: PLACE block
+                        // Place at the adjacent position (in front of hit face)
+                        println!("🧱 Placing block at {:?} (adjacent to {:?})", hit.adjacent_position, hit.position);
+                        self.chunk_manager.set_block(hit.adjacent_position, STONE);
+                        
+                        // Update dirty chunks
+                        self.update_dirty_chunks();
+                    }
+                    _ => {}
+                }
+            } else {
+                println!("❌ No block in range (max: {:.1}m)", max_distance);
+            }
+        }
     }
     
     /// Generate mesh for all dirty chunks
@@ -250,7 +358,7 @@ impl ApplicationHandler for App {
 
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.window.is_none() {
-            let attrs = Window::default_attributes().with_title("Dev Engine - Click to play");
+            let attrs = Window::default_attributes().with_title("Dev Engine - Voxel World (NEW)");
             let window = el.create_window(attrs).expect("create_window");
             let window_ref: &'static Window = Box::leak(Box::new(window));
             
@@ -262,11 +370,13 @@ impl ApplicationHandler for App {
             self.window = Some(window_ref);
             self.gfx = Some(gfx);
             
-            // Generate test world
-            self.generate_test_world();
+            println!("=== NEW CHUNK SYSTEM INITIALIZED ===");
+            println!("✓ Worker threads: 4");
+            println!("✓ View radius: 8 chunks");
+            println!("✓ Generation radius: 10 chunks");
+            println!("✓ Chunk pool capacity: 512");
             
-            // Generate meshes for all chunks
-            self.update_dirty_chunks();
+            // Initial chunk loading will happen in about_to_wait
         }
     }
 
@@ -327,10 +437,15 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 // Click to enter Game mode from UI mode
-                if state == ElementState::Pressed 
-                   && button == rwinit::event::MouseButton::Left
-                   && self.control_mode == ControlMode::UI {
-                    self.set_control_mode(ControlMode::Game);
+                if self.control_mode == ControlMode::UI {
+                    if state == ElementState::Pressed && button == rwinit::event::MouseButton::Left {
+                        self.set_control_mode(ControlMode::Game);
+                    }
+                } else if self.control_mode == ControlMode::Game {
+                    // Voxel picking in Game mode
+                    if state == ElementState::Pressed {
+                        self.handle_voxel_picking(button);
+                    }
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -377,7 +492,13 @@ impl ApplicationHandler for App {
             if let Some(g) = self.gfx.as_mut() {
                 // WASD camera movement in 3D
                 // Space to go up, C to go down
-                let speed = 3.0 * self.dt.as_secs_f32();
+                // Hold Shift for 10x speed boost
+                let mut speed = 3.0 * self.dt.as_secs_f32();
+                
+                // Speed boost when holding Shift
+                if self.input.held(KeyCode::ShiftLeft) || self.input.held(KeyCode::ShiftRight) {
+                    speed *= 10.0;
+                }
                 
                 let forward = (self.input.held(KeyCode::KeyW) as i32 - self.input.held(KeyCode::KeyS) as i32) as f32;
                 let right = (self.input.held(KeyCode::KeyD) as i32 - self.input.held(KeyCode::KeyA) as i32) as f32;
@@ -392,6 +513,16 @@ impl ApplicationHandler for App {
                 let model = Mat4::IDENTITY;  // No rotation for voxels
                 g.set_model(model);
             }
+            
+            // NEW: Update chunk loading based on camera position
+            self.update_chunk_loading();
+            
+            // NEW: Process completed jobs from workers
+            self.process_completed_jobs();
+            
+            // Update dirty chunks (from block editing)
+            self.update_dirty_chunks();
+            
             self.engine.tick_once();
             self.next_tick += self.dt;
         }

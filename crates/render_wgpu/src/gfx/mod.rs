@@ -38,8 +38,8 @@ pub struct Gfx<'w> {
     pub(crate) ibuf: crate::wgpu::Buffer,
     pub(crate) index_count: u32,
 
-    pub(crate) cam_eye: Vec3,
-    pub(crate) cam_target: Vec3,
+    pub cam_eye: Vec3,
+    pub cam_target: Vec3,
     pub cam_yaw: f32,
     pub cam_pitch: f32,
     pub(crate) cam_buf: crate::wgpu::Buffer,
