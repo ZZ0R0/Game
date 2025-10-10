@@ -66,52 +66,73 @@ impl TextureAtlas {
         // Grid size: 16x16 tiles
         let tile_size = 1.0 / 16.0;
         
-        // Define block textures (example layout)
+        // Define block textures - Simplified: Blue top/bottom, White sides
         // AIR (0) - no texture needed
         
-        // STONE - uniform texture at (1,0)
-        atlas.add_uniform_block(crate::chunk::STONE, 1, 0, tile_size);
+        // STONE - Blue top/bottom (0,0), White sides (1,0)
+        atlas.add_custom_block(
+            crate::chunk::STONE,
+            (0, 0), // Top = Blue
+            (0, 0), // Bottom = Blue
+            (1, 0), // Side = White
+            tile_size,
+        );
         
-        // DIRT - uniform texture at (2,0)
-        atlas.add_uniform_block(crate::chunk::DIRT, 2, 0, tile_size);
+        // DIRT - Blue top/bottom, White sides
+        atlas.add_custom_block(
+            crate::chunk::DIRT,
+            (0, 0), // Top = Blue
+            (0, 0), // Bottom = Blue
+            (1, 0), // Side = White
+            tile_size,
+        );
         
-        // GRASS - custom top/bottom/side
+        // GRASS - Blue top/bottom, White sides
         atlas.add_custom_block(
             crate::chunk::GRASS,
-            (0, 0), // Top = grass
-            (2, 0), // Bottom = dirt
-            (3, 0), // Side = grass_side
+            (0, 0), // Top = Blue
+            (0, 0), // Bottom = Blue
+            (1, 0), // Side = White
             tile_size,
         );
         
-        // WOOD - uniform at (4,0)
-        atlas.add_uniform_block(crate::chunk::WOOD, 4, 0, tile_size);
+        // WOOD - Blue top/bottom, White sides
+        atlas.add_custom_block(
+            crate::chunk::WOOD,
+            (0, 0), // Top = Blue
+            (0, 0), // Bottom = Blue
+            (1, 0), // Side = White
+            tile_size,
+        );
         
-        // LEAVES - uniform at (5,0)
-        atlas.add_uniform_block(crate::chunk::LEAVES, 5, 0, tile_size);
+        // LEAVES - Blue top/bottom, White sides
+        atlas.add_custom_block(
+            crate::chunk::LEAVES,
+            (0, 0), // Top = Blue
+            (0, 0), // Bottom = Blue
+            (1, 0), // Side = White
+            tile_size,
+        );
         
-        // WATER (6) - semi-transparent at (6,0)
-        atlas.add_uniform_block(6, 6, 0, tile_size);
+        // WATER (6) - Blue top/bottom, White sides
+        atlas.add_custom_block(
+            6,
+            (0, 0), // Top = Blue
+            (0, 0), // Bottom = Blue
+            (1, 0), // Side = White
+            tile_size,
+        );
         
-        // GLASS (7) - transparent at (7,0)
-        atlas.add_uniform_block(7, 7, 0, tile_size);
+        // GLASS (7) - Blue top/bottom, White sides
+        atlas.add_custom_block(
+            7,
+            (0, 0), // Top = Blue
+            (0, 0), // Bottom = Blue
+            (1, 0), // Side = White
+            tile_size,
+        );
         
         atlas
-    }
-    
-    /// Add a block with the same texture on all faces
-    fn add_uniform_block(&mut self, block_id: BlockId, tile_x: usize, tile_y: usize, tile_size: f32) {
-        let rect = AtlasRect::new(
-            tile_x as f32 * tile_size,
-            tile_y as f32 * tile_size,
-            tile_size,
-            tile_size,
-        );
-        
-        for face in [FaceDir::Top, FaceDir::Bottom, FaceDir::North, 
-                     FaceDir::South, FaceDir::East, FaceDir::West] {
-            self.mapping.insert((block_id, face), rect);
-        }
     }
     
     /// Add a block with different textures for top/bottom/sides

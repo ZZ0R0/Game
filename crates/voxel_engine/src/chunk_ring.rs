@@ -105,24 +105,24 @@ impl ChunkRing {
             .collect()
     }
     
-    /// Calculate all chunks within a radius (cylindrical, on XZ plane, full Y)
+    /// Calculate all chunks within a radius (spherical, 3D)
     fn calculate_chunks_in_radius(&self, center: IVec3, radius: i32) -> HashSet<IVec3> {
         let mut chunks = HashSet::new();
         
         let radius_sq = radius * radius;
         
-        // Iterate over XZ plane (horizontal)
+        // Iterate over 3D space (spherical volume)
         for x in (center.x - radius)..=(center.x + radius) {
-            for z in (center.z - radius)..=(center.z + radius) {
-                let dx = x - center.x;
-                let dz = z - center.z;
-                let dist_sq = dx * dx + dz * dz;
-                
-                if dist_sq <= radius_sq {
-                    // Full Y range (vertical columns)
-                    // For now, load chunks at Y=0 only (flat world)
-                    // Can be extended to support vertical chunks
-                    chunks.insert(IVec3::new(x, 0, z));
+            for y in (center.y - radius)..=(center.y + radius) {
+                for z in (center.z - radius)..=(center.z + radius) {
+                    let dx = x - center.x;
+                    let dy = y - center.y;
+                    let dz = z - center.z;
+                    let dist_sq = dx * dx + dy * dy + dz * dz;
+                    
+                    if dist_sq <= radius_sq {
+                        chunks.insert(IVec3::new(x, y, z));
+                    }
                 }
             }
         }

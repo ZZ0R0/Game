@@ -38,10 +38,14 @@ pub struct Gfx<'w> {
     pub(crate) ibuf: crate::wgpu::Buffer,
     pub(crate) index_count: u32,
 
+    pub(crate) fov_radians: f32, // Field of View in radians (default 90°)
+    pub(crate) fov_distance: f32, // Distance to the near plane (default 0.1)
+
     pub cam_eye: Vec3,
     pub cam_target: Vec3,
     pub cam_yaw: f32,
     pub cam_pitch: f32,
+
     pub(crate) cam_buf: crate::wgpu::Buffer,
     pub(crate) cam_bg: crate::wgpu::BindGroup,
 
@@ -346,6 +350,9 @@ impl<'w> Gfx<'w> {
         let egui_state = EguiWinit::new(egui_ctx.clone(), ViewportId::ROOT, window, None, None, None);
         let egui_painter = EguiRenderer::new(&device, surface_format, None, 1, false);
 
+        let fov_radians = std::f32::consts::FRAC_PI_2; // 90 degrees
+        let fov_distance = 1000.0; // Far plane at 1000 blocks
+
         let mut gfx = Self {
             surface,
             device,
@@ -362,6 +369,8 @@ impl<'w> Gfx<'w> {
             vbuf,
             ibuf,
             index_count: indices.len() as u32,
+            fov_radians,
+            fov_distance,
             cam_eye,
             cam_target,
             cam_yaw,

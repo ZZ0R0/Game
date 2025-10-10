@@ -8,7 +8,7 @@ use render_wgpu::gfx::Gfx;
 use render_wgpu::winit as rwinit;
 
 use voxel_engine::{
-    ChunkManager, mesh_chunk, STONE, AIR,
+    ChunkManager, greedy_mesh_chunk, TextureAtlas, STONE, AIR,
     ChunkRing, ChunkRingConfig, JobQueue, JobWorker, WorkerHandle, ChunkJob, JobResult,
     TerrainGenerator, ChunkPool, MeshPool,
 };
@@ -43,6 +43,11 @@ pub struct App {
     // FPS
     frames: u32,
     last_fps_t: Instant,
+    
+    // FPS tracking for average
+    total_fps_samples: f32,
+    fps_sample_count: u32,
+    start_time: Instant,
 
     // rotation
     rot_on: bool,
@@ -57,6 +62,7 @@ pub struct App {
     mesh_pool: MeshPool,
     worker_handle: Option<WorkerHandle>,
     voxel_mesh: Option<MeshBuffers>,
+    texture_atlas: TextureAtlas,
     
     // Control mode
     control_mode: ControlMode,
@@ -70,12 +76,20 @@ impl App {
         let worker = JobWorker::new(Arc::clone(&job_queue), 4); // 4 worker threads
         let worker_handle = worker.start();
         
-        // Configure chunk ring
+        // Configure chunk ring based on render distance
+        // fov_distance from renderer = 1000 blocks (far plane)
+        // Each chunk = 32 blocks, so view_radius = 1000 / 32 ≈ 31 chunks
+        const CHUNK_SIZE: f32 = 32.0;
+        const RENDER_DISTANCE: f32 = 100.0; // Must match fov_distance in gfx
+        let view_radius = (RENDER_DISTANCE / CHUNK_SIZE) as i32;
+        
         let ring_config = ChunkRingConfig {
-            view_radius: 8,
-            generation_radius: 10,
-            unload_radius: 12,
+            view_radius,                    // Based on render distance
+            generation_radius: view_radius + 2,  // Generate 2 chunks ahead
+            unload_radius: view_radius + 4,      // Unload 4 chunks beyond
         };
+        
+        let start_time = Instant::now();
         
         Self {
             window: None,
@@ -88,7 +102,10 @@ impl App {
             next_tick: Instant::now(),
             input: Input::default(),
             frames: 0,
-            last_fps_t: Instant::now(),
+            last_fps_t: start_time,
+            total_fps_samples: 0.0,
+            fps_sample_count: 0,
+            start_time,
             rot_on: true,
             angle: 0.0,
             chunk_manager: ChunkManager::new(),
@@ -99,6 +116,7 @@ impl App {
             mesh_pool: MeshPool::new(512),
             worker_handle: Some(worker_handle),
             voxel_mesh: None,
+            texture_atlas: TextureAtlas::new_16x16(),
             control_mode: ControlMode::UI,  // Start in UI mode
             fullscreen: false,
         }
@@ -141,6 +159,26 @@ impl App {
                 println!("Fullscreen: OFF");
             }
         }
+    }
+    
+    /// Display FPS statistics and exit
+    fn display_fps_stats_and_exit(&self, el: &ActiveEventLoop) {
+        println!("\n═══════════════════════════════════════");
+        println!("          CLOSING APPLICATION          ");
+        println!("═══════════════════════════════════════");
+        
+        let total_duration = self.start_time.elapsed();
+        println!("Total runtime: {:.2}s", total_duration.as_secs_f32());
+        
+        if self.fps_sample_count > 0 {
+            let avg_fps = self.total_fps_samples / self.fps_sample_count as f32;
+            println!("Average FPS: {:.1} (based on {} samples)", avg_fps, self.fps_sample_count);
+        } else {
+            println!("No FPS data collected");
+        }
+        
+        println!("═══════════════════════════════════════\n");
+        el.exit();
     }
 }
 
@@ -310,7 +348,8 @@ impl App {
         if let Some(g) = self.gfx.as_mut() {
             for chunk_pos in &dirty_chunks {
                 if let Some(chunk) = self.chunk_manager.get_chunk(*chunk_pos) {
-                    let mesh = mesh_chunk(chunk);
+                    // Use greedy mesher with atlas and chunk manager for seamless meshing
+                    let mesh = greedy_mesh_chunk(chunk, Some(&self.chunk_manager), &self.texture_atlas);
                     
                     // Convert to vertex bytes (VertexTex format)
                     use bytemuck::cast_slice;
@@ -402,7 +441,7 @@ impl ApplicationHandler for App {
         self.input.on_event(&event);
 
         match event {
-            WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::CloseRequested => self.display_fps_stats_and_exit(el),
             WindowEvent::Resized(sz) => {
                 if let Some(g) = self.gfx.as_mut() { g.resize(sz); }
             }
@@ -423,7 +462,7 @@ impl ApplicationHandler for App {
                                 // ESC toggles between Game and UI mode
                                 match self.control_mode {
                                     ControlMode::Game => self.set_control_mode(ControlMode::UI),
-                                    ControlMode::UI => el.exit(),  // ESC in UI mode = quit
+                                    ControlMode::UI => self.display_fps_stats_and_exit(el),  // ESC in UI mode = quit with stats
                                 }
                             }
                             KeyCode::F11 => {
@@ -465,6 +504,11 @@ impl ApplicationHandler for App {
                 if dt.as_secs_f32() >= 1.0 {
                     let fps = self.frames as f32 / dt.as_secs_f32();
                     if let Some(g) = self.gfx.as_mut() { g.set_fps(fps); }
+                    
+                    // Track FPS for average calculation
+                    self.total_fps_samples += fps;
+                    self.fps_sample_count += 1;
+                    
                     self.frames = 0;
                     self.last_fps_t = now;
                 }

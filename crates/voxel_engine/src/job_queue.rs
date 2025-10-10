@@ -136,7 +136,10 @@ impl JobQueue {
                     use std::panic::AssertUnwindSafe;
                     
                     let result = catch_unwind(AssertUnwindSafe(|| {
-                        crate::meshing::mesh_chunk_with_ao(&chunk)
+                        // Use greedy mesher without neighbors for async meshing
+                        // We pass None for chunk_manager since we don't have access to it here
+                        let atlas = crate::atlas::TextureAtlas::new_16x16();
+                        crate::meshing::greedy_mesh_chunk(&chunk, None, &atlas)
                     }));
                     
                     match result {

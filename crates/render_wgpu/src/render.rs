@@ -36,6 +36,8 @@ impl<'w> Gfx<'w> {
                     let stats = &self.chunk_renderer.stats;
                     if stats.total_chunks > 0 {
                         ui.separator();
+                        ui.label(format!("View: {:.0}m", self.fov_distance));
+                        ui.separator();
                         ui.label(format!("Chunks: {}/{}", stats.visible_chunks, stats.total_chunks));
                         ui.separator();
                         ui.label(format!("Triangles: {}K", stats.rendered_triangles / 1000));
