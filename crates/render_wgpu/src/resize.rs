@@ -1,5 +1,5 @@
-use glam::Vec3;
 use crate::winit::{dpi::PhysicalSize, window::Window};
+use glam::Vec3;
 
 use crate::gfx::{CameraUBO, Gfx, ObjectUBO};
 use crate::texture::create_depth_view;
@@ -17,7 +17,9 @@ impl<'w> Gfx<'w> {
         self.write_camera();
     }
 
-    pub fn size(&self) -> PhysicalSize<u32> { self.size }
+    pub fn size(&self) -> PhysicalSize<u32> {
+        self.size
+    }
 
     pub fn on_window_event(&mut self, window: &Window, event: &crate::winit::event::WindowEvent) {
         let _ = self.egui_state.on_window_event(window, event);
@@ -53,17 +55,22 @@ impl<'w> Gfx<'w> {
         let forward_dir = (self.cam_target - self.cam_eye).normalize();
         let right_dir = forward_dir.cross(Vec3::Y).normalize();
         let up_dir = Vec3::Y;
-        
+
         self.cam_eye += forward_dir * forward + right_dir * right + up_dir * up;
         self.update_camera_target();
         self.write_camera();
     }
 
-    pub fn set_fps(&mut self, fps: f32) { self.hud_fps = Some(fps); }
+    pub fn set_fps(&mut self, fps: f32) {
+        self.hud_fps = Some(fps);
+    }
 
     pub fn toggle_vsync(&mut self) {
-        let has_mailbox = self.present_modes.contains(&crate::wgpu::PresentMode::Mailbox);
-        let new_mode = if self.config.present_mode == crate::wgpu::PresentMode::Fifo && has_mailbox {
+        let has_mailbox = self
+            .present_modes
+            .contains(&crate::wgpu::PresentMode::Mailbox);
+        let new_mode = if self.config.present_mode == crate::wgpu::PresentMode::Fifo && has_mailbox
+        {
             crate::wgpu::PresentMode::Mailbox
         } else {
             crate::wgpu::PresentMode::Fifo
@@ -72,9 +79,15 @@ impl<'w> Gfx<'w> {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn set_model(&mut self, m: glam::Mat4) { self.model = m; self.write_object(); }
-    pub fn set_tint_rgba(&mut self, rgba: [f32; 4]) { self.tint = rgba; self.write_object(); }
-    
+    pub fn set_model(&mut self, m: glam::Mat4) {
+        self.model = m;
+        self.write_object();
+    }
+    pub fn set_tint_rgba(&mut self, rgba: [f32; 4]) {
+        self.tint = rgba;
+        self.write_object();
+    }
+
     /// Get the current view-projection matrix for frustum culling
     pub fn get_vp_matrix(&self) -> glam::Mat4 {
         let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
@@ -86,19 +99,49 @@ impl<'w> Gfx<'w> {
     pub(crate) fn write_camera(&mut self) {
         let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
         let view = glam::Mat4::look_at_rh(self.cam_eye, self.cam_target, Vec3::Y);
-        
+
         let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.1, self.fov_distance);
         let vp = proj * view;
-        
+
         // Update frustum for culling
         self.frustum = math_util::Frustum::from_matrix(vp);
-        
-        let ubo = CameraUBO { vp: vp.to_cols_array_2d() };
-        self.queue.write_buffer(&self.cam_buf, 0, bytemuck::bytes_of(&ubo));
+
+        let ubo = CameraUBO {
+            vp: vp.to_cols_array_2d(),
+        };
+        self.queue
+            .write_buffer(&self.cam_buf, 0, bytemuck::bytes_of(&ubo));
     }
 
     pub(crate) fn write_object(&mut self) {
-        let ubo = ObjectUBO { model: self.model.to_cols_array_2d(), tint: self.tint };
-        self.queue.write_buffer(&self.obj_buf, 0, bytemuck::bytes_of(&ubo));
+        let ubo = ObjectUBO {
+            model: self.model.to_cols_array_2d(),
+            tint: self.tint,
+        };
+        self.queue
+            .write_buffer(&self.obj_buf, 0, bytemuck::bytes_of(&ubo));
+    }
+
+    pub(crate) fn write_wireframe(&mut self) {
+        let ubo = crate::gfx::WireframeUBO {
+            enabled: if self.wireframe_state.enabled {
+                1.0
+            } else {
+                0.0
+            },
+            color: self.wireframe_state.color,
+        };
+        self.queue
+            .write_buffer(&self.wireframe_buf, 0, bytemuck::bytes_of(&ubo));
+    }
+
+    pub fn toggle_wireframe(&mut self) {
+        self.wireframe_state.enabled = !self.wireframe_state.enabled;
+        self.write_wireframe();
+    }
+
+    pub fn set_wireframe_color(&mut self, color: [f32; 3]) {
+        self.wireframe_state.color = color;
+        self.write_wireframe();
     }
 }

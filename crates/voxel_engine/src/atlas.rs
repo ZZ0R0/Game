@@ -7,17 +7,17 @@ use std::collections::HashMap;
 /// Rectangle in a texture atlas (normalized 0..1 coordinates)
 #[derive(Debug, Clone, Copy)]
 pub struct AtlasRect {
-    pub u: f32,      // Left U coordinate
-    pub v: f32,      // Top V coordinate
-    pub w: f32,      // Width in U
-    pub h: f32,      // Height in V
+    pub u: f32, // Left U coordinate
+    pub v: f32, // Top V coordinate
+    pub w: f32, // Width in U
+    pub h: f32, // Height in V
 }
 
 impl AtlasRect {
     pub fn new(u: f32, v: f32, w: f32, h: f32) -> Self {
         Self { u, v, w, h }
     }
-    
+
     /// Get UV coordinates for a quad's 4 corners
     /// Returns: [(u0,v0), (u1,v0), (u1,v1), (u0,v1)]
     pub fn get_uvs(&self) -> [[f32; 2]; 4] {
@@ -25,12 +25,12 @@ impl AtlasRect {
         let v0 = self.v;
         let u1 = self.u + self.w;
         let v1 = self.v + self.h;
-        
+
         [
-            [u0, v0],  // Bottom-left
-            [u1, v0],  // Bottom-right
-            [u1, v1],  // Top-right
-            [u0, v1],  // Top-left
+            [u0, v0], // Bottom-left
+            [u1, v0], // Bottom-right
+            [u1, v1], // Top-right
+            [u0, v1], // Top-left
         ]
     }
 }
@@ -50,7 +50,7 @@ pub enum FaceDir {
 pub struct TextureAtlas {
     /// Map: (BlockId, FaceDir) → AtlasRect
     mapping: HashMap<(BlockId, FaceDir), AtlasRect>,
-    
+
     /// Fallback texture for unmapped blocks
     fallback: AtlasRect,
 }
@@ -62,13 +62,13 @@ impl TextureAtlas {
             mapping: HashMap::new(),
             fallback: AtlasRect::new(0.0, 0.0, 1.0 / 16.0, 1.0 / 16.0),
         };
-        
+
         // Grid size: 16x16 tiles
         let tile_size = 1.0 / 16.0;
-        
+
         // Define block textures - Simplified: Blue top/bottom, White sides
         // AIR (0) - no texture needed
-        
+
         // STONE - Blue top/bottom (0,0), White sides (1,0)
         atlas.add_custom_block(
             crate::chunk::STONE,
@@ -77,7 +77,7 @@ impl TextureAtlas {
             (1, 0), // Side = White
             tile_size,
         );
-        
+
         // DIRT - Blue top/bottom, White sides
         atlas.add_custom_block(
             crate::chunk::DIRT,
@@ -86,7 +86,7 @@ impl TextureAtlas {
             (1, 0), // Side = White
             tile_size,
         );
-        
+
         // GRASS - Blue top/bottom, White sides
         atlas.add_custom_block(
             crate::chunk::GRASS,
@@ -95,7 +95,7 @@ impl TextureAtlas {
             (1, 0), // Side = White
             tile_size,
         );
-        
+
         // WOOD - Blue top/bottom, White sides
         atlas.add_custom_block(
             crate::chunk::WOOD,
@@ -104,7 +104,7 @@ impl TextureAtlas {
             (1, 0), // Side = White
             tile_size,
         );
-        
+
         // LEAVES - Blue top/bottom, White sides
         atlas.add_custom_block(
             crate::chunk::LEAVES,
@@ -113,7 +113,7 @@ impl TextureAtlas {
             (1, 0), // Side = White
             tile_size,
         );
-        
+
         // WATER (6) - Blue top/bottom, White sides
         atlas.add_custom_block(
             6,
@@ -122,7 +122,7 @@ impl TextureAtlas {
             (1, 0), // Side = White
             tile_size,
         );
-        
+
         // GLASS (7) - Blue top/bottom, White sides
         atlas.add_custom_block(
             7,
@@ -131,10 +131,10 @@ impl TextureAtlas {
             (1, 0), // Side = White
             tile_size,
         );
-        
+
         atlas
     }
-    
+
     /// Add a block with different textures for top/bottom/sides
     fn add_custom_block(
         &mut self,
@@ -145,26 +145,33 @@ impl TextureAtlas {
         tile_size: f32,
     ) {
         let top_rect = AtlasRect::new(
-            top.0 as f32 * tile_size, top.1 as f32 * tile_size,
-            tile_size, tile_size
+            top.0 as f32 * tile_size,
+            top.1 as f32 * tile_size,
+            tile_size,
+            tile_size,
         );
         let bottom_rect = AtlasRect::new(
-            bottom.0 as f32 * tile_size, bottom.1 as f32 * tile_size,
-            tile_size, tile_size
+            bottom.0 as f32 * tile_size,
+            bottom.1 as f32 * tile_size,
+            tile_size,
+            tile_size,
         );
         let side_rect = AtlasRect::new(
-            side.0 as f32 * tile_size, side.1 as f32 * tile_size,
-            tile_size, tile_size
+            side.0 as f32 * tile_size,
+            side.1 as f32 * tile_size,
+            tile_size,
+            tile_size,
         );
-        
+
         self.mapping.insert((block_id, FaceDir::Top), top_rect);
-        self.mapping.insert((block_id, FaceDir::Bottom), bottom_rect);
+        self.mapping
+            .insert((block_id, FaceDir::Bottom), bottom_rect);
         self.mapping.insert((block_id, FaceDir::North), side_rect);
         self.mapping.insert((block_id, FaceDir::South), side_rect);
         self.mapping.insert((block_id, FaceDir::East), side_rect);
         self.mapping.insert((block_id, FaceDir::West), side_rect);
     }
-    
+
     /// Get texture coordinates for a block face
     pub fn get_uvs(&self, block_id: BlockId, face: FaceDir) -> [[f32; 2]; 4] {
         self.mapping
@@ -172,7 +179,7 @@ impl TextureAtlas {
             .unwrap_or(&self.fallback)
             .get_uvs()
     }
-    
+
     /// Get atlas rect for a block face
     pub fn get_rect(&self, block_id: BlockId, face: FaceDir) -> AtlasRect {
         self.mapping

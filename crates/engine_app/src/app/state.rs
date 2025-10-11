@@ -20,8 +20,12 @@ impl Input {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     match event.state {
-                        ElementState::Pressed => { self.keys.insert(code); }
-                        ElementState::Released => { self.keys.remove(&code); }
+                        ElementState::Pressed => {
+                            self.keys.insert(code);
+                        }
+                        ElementState::Released => {
+                            self.keys.remove(&code);
+                        }
                     }
                 }
             }

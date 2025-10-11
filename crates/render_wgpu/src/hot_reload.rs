@@ -23,17 +23,28 @@ impl<'w> Gfx<'w> {
         let Some(h) = self.hot.clone() else {
             return;
         };
-        let Ok(md) = fs::metadata(&h.path) else { return; };
-        let Ok(new_mtime) = md.modified() else { return; };
-        if new_mtime <= h.mtime { return; }
+        let Ok(md) = fs::metadata(&h.path) else {
+            return;
+        };
+        let Ok(new_mtime) = md.modified() else {
+            return;
+        };
+        if new_mtime <= h.mtime {
+            return;
+        }
 
-        let Ok(code) = fs::read_to_string(&h.path) else { return; };
+        let Ok(code) = fs::read_to_string(&h.path) else {
+            return;
+        };
 
-        self.device.push_error_scope(crate::wgpu::ErrorFilter::Validation);
-        let shader = self.device.create_shader_module(crate::wgpu::ShaderModuleDescriptor {
-            label: Some("hot_shader"),
-            source: crate::wgpu::ShaderSource::Wgsl(code.into()),
-        });
+        self.device
+            .push_error_scope(crate::wgpu::ErrorFilter::Validation);
+        let shader = self
+            .device
+            .create_shader_module(crate::wgpu::ShaderModuleDescriptor {
+                label: Some("hot_shader"),
+                source: crate::wgpu::ShaderSource::Wgsl(code.into()),
+            });
         let err = pollster::block_on(self.device.pop_error_scope());
 
         if let Some(e) = err {

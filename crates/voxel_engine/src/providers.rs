@@ -6,28 +6,28 @@
 //! - AsteroidProvider: Procedural asteroid generation  
 //! - DeltaStore: Sparse edit overlay
 
+use crate::chunk::{BlockId, CHUNK_SIZE, CHUNK_VOLUME};
+use crate::voxel_schema::{Density, MaterialId};
 use glam::{IVec3, Vec3};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
-use crate::chunk::{BlockId, CHUNK_SIZE, CHUNK_VOLUME};
-use crate::voxel_schema::{MaterialId, Density};
 
 /// Errors that can occur during provider operations
 #[derive(Debug, Clone)]
 pub enum ProviderError {
     /// Region is outside valid bounds
     OutOfBounds,
-    
+
     /// Provider is read-only
     ReadOnly,
-    
+
     /// Invalid LOD level
     InvalidLOD,
-    
+
     /// IO error during save/load
     IoError(String),
-    
+
     /// Generic error
     Other(String),
 }
@@ -51,7 +51,7 @@ impl std::error::Error for ProviderError {}
 pub enum VoxelValue {
     /// Block-based voxel (BlockId)
     Block(BlockId),
-    
+
     /// Density-based voxel (Density + MaterialId)
     Density(Density, MaterialId),
 }
@@ -71,7 +71,7 @@ impl VoxelValue {
 pub struct VoxelData {
     /// Dimensions (in voxels)
     pub size: IVec3,
-    
+
     /// Voxel values (size.x * size.y * size.z)
     pub values: Vec<VoxelValue>,
 }
@@ -85,7 +85,7 @@ impl VoxelData {
             values: vec![VoxelValue::Block(crate::chunk::AIR); volume],
         }
     }
-    
+
     /// Get voxel at local coordinates
     pub fn get(&self, x: i32, y: i32, z: i32) -> Option<VoxelValue> {
         if x < 0 || y < 0 || z < 0 || x >= self.size.x || y >= self.size.y || z >= self.size.z {
@@ -94,7 +94,7 @@ impl VoxelData {
         let idx = (x + y * self.size.x + z * self.size.x * self.size.y) as usize;
         self.values.get(idx).copied()
     }
-    
+
     /// Set voxel at local coordinates
     pub fn set(&mut self, x: i32, y: i32, z: i32, value: VoxelValue) {
         if x < 0 || y < 0 || z < 0 || x >= self.size.x || y >= self.size.y || z >= self.size.z {
@@ -112,10 +112,10 @@ impl VoxelData {
 pub struct Brush {
     /// Brush shape
     pub shape: BrushShape,
-    
+
     /// Brush size
     pub size: f32,
-    
+
     /// Value to write
     pub value: VoxelValue,
 }
@@ -150,14 +150,14 @@ impl Brush {
 /// Core trait for all voxel providers
 pub trait VoxelProvider: Send + Sync {
     /// Read voxel data in a range with LOD sampling
-    /// 
+    ///
     /// - `min`, `max`: World coordinates (inclusive)
     /// - `lod`: Level of detail (0 = full resolution, 1+ = lower resolution)
     fn read_range(&self, min: IVec3, max: IVec3, lod: u32) -> Result<VoxelData, ProviderError>;
-    
+
     /// Write a single voxel
     fn write_voxel(&mut self, pos: IVec3, value: VoxelValue) -> Result<(), ProviderError>;
-    
+
     /// Write a brush pattern
     fn write_brush(&mut self, center: IVec3, brush: &Brush) -> Result<(), ProviderError> {
         // Default implementation: write individual voxels
@@ -168,7 +168,7 @@ pub trait VoxelProvider: Send + Sync {
                     let pos = center + IVec3::new(x, y, z);
                     let pos_f = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32);
                     let center_f = Vec3::new(center.x as f32, center.y as f32, center.z as f32);
-                    
+
                     if brush.contains(center_f, pos_f) {
                         self.write_voxel(pos, brush.value)?;
                     }
@@ -177,10 +177,10 @@ pub trait VoxelProvider: Send + Sync {
         }
         Ok(())
     }
-    
+
     /// Get provider name for debugging
     fn provider_name(&self) -> &str;
-    
+
     /// Check if provider supports writes
     fn is_writable(&self) -> bool;
 }
@@ -194,10 +194,10 @@ pub trait VoxelProvider: Send + Sync {
 pub struct GridStoreConfig {
     /// Enable palette compression
     pub use_palette: bool,
-    
+
     /// Max palette entries before compaction
     pub max_palette_size: usize,
-    
+
     /// Enable dirty tracking
     pub track_dirty: bool,
 }
@@ -217,10 +217,10 @@ impl Default for GridStoreConfig {
 pub struct ChunkData {
     /// Block data
     pub blocks: Box<[BlockId; CHUNK_VOLUME]>,
-    
+
     /// Palette (for compression)
     pub palette: Vec<BlockId>,
-    
+
     /// Version (for cache invalidation)
     pub version: u32,
 }
@@ -234,7 +234,7 @@ impl ChunkData {
             version: 0,
         }
     }
-    
+
     /// Create filled chunk
     pub fn filled(block: BlockId) -> Self {
         Self {
@@ -249,10 +249,10 @@ impl ChunkData {
 pub struct GridStoreProvider {
     /// Chunks (chunk_pos -> data)
     chunks: Arc<RwLock<HashMap<IVec3, ChunkData>>>,
-    
+
     /// Dirty regions
     dirty_regions: Arc<RwLock<HashSet<IVec3>>>,
-    
+
     /// Configuration
     config: GridStoreConfig,
 }
@@ -266,30 +266,30 @@ impl GridStoreProvider {
             config,
         }
     }
-    
+
     /// Insert a chunk
     pub fn insert_chunk(&mut self, chunk_pos: IVec3, data: ChunkData) {
         let mut chunks = self.chunks.write().unwrap();
         chunks.insert(chunk_pos, data);
-        
+
         if self.config.track_dirty {
             let mut dirty = self.dirty_regions.write().unwrap();
             dirty.insert(chunk_pos);
         }
     }
-    
+
     /// Get chunk (read-only)
     pub fn get_chunk(&self, chunk_pos: IVec3) -> Option<ChunkData> {
         let chunks = self.chunks.read().unwrap();
         chunks.get(&chunk_pos).cloned()
     }
-    
+
     /// Take dirty chunks
     pub fn take_dirty_chunks(&mut self) -> Vec<IVec3> {
         let mut dirty = self.dirty_regions.write().unwrap();
         dirty.drain().collect()
     }
-    
+
     /// Compact palettes
     pub fn compact_palettes(&mut self) {
         let mut chunks = self.chunks.write().unwrap();
@@ -300,7 +300,7 @@ impl GridStoreProvider {
             }
         }
     }
-    
+
     /// Get chunk count
     pub fn chunk_count(&self) -> usize {
         let chunks = self.chunks.read().unwrap();
@@ -313,12 +313,12 @@ impl VoxelProvider for GridStoreProvider {
         if lod > 0 {
             return Err(ProviderError::InvalidLOD);
         }
-        
+
         let size = max - min + IVec3::ONE;
         let mut data = VoxelData::new(size);
-        
+
         let chunks = self.chunks.read().unwrap();
-        
+
         // Iterate through all voxels in range
         for z in 0..size.z {
             for y in 0..size.y {
@@ -329,11 +329,14 @@ impl VoxelProvider for GridStoreProvider {
                         world_pos.y.div_euclid(CHUNK_SIZE as i32),
                         world_pos.z.div_euclid(CHUNK_SIZE as i32),
                     );
-                    
+
                     if let Some(chunk_data) = chunks.get(&chunk_pos) {
                         let local = world_pos - chunk_pos * CHUNK_SIZE as i32;
-                        let idx = (local.x + local.y * CHUNK_SIZE as i32 + local.z * CHUNK_SIZE as i32 * CHUNK_SIZE as i32) as usize;
-                        
+                        let idx = (local.x
+                            + local.y * CHUNK_SIZE as i32
+                            + local.z * CHUNK_SIZE as i32 * CHUNK_SIZE as i32)
+                            as usize;
+
                         if idx < CHUNK_VOLUME {
                             let block = chunk_data.blocks[idx];
                             data.set(x, y, z, VoxelValue::Block(block));
@@ -342,46 +345,52 @@ impl VoxelProvider for GridStoreProvider {
                 }
             }
         }
-        
+
         Ok(data)
     }
-    
+
     fn write_voxel(&mut self, pos: IVec3, value: VoxelValue) -> Result<(), ProviderError> {
         let chunk_pos = IVec3::new(
             pos.x.div_euclid(CHUNK_SIZE as i32),
             pos.y.div_euclid(CHUNK_SIZE as i32),
             pos.z.div_euclid(CHUNK_SIZE as i32),
         );
-        
+
         let local = pos - chunk_pos * CHUNK_SIZE as i32;
-        let idx = (local.x + local.y * CHUNK_SIZE as i32 + local.z * CHUNK_SIZE as i32 * CHUNK_SIZE as i32) as usize;
-        
+        let idx = (local.x
+            + local.y * CHUNK_SIZE as i32
+            + local.z * CHUNK_SIZE as i32 * CHUNK_SIZE as i32) as usize;
+
         if idx >= CHUNK_VOLUME {
             return Err(ProviderError::OutOfBounds);
         }
-        
+
         let block = match value {
             VoxelValue::Block(b) => b,
-            VoxelValue::Density(_, _) => return Err(ProviderError::Other("GridStore only supports blocks".to_string())),
+            VoxelValue::Density(_, _) => {
+                return Err(ProviderError::Other(
+                    "GridStore only supports blocks".to_string(),
+                ))
+            }
         };
-        
+
         let mut chunks = self.chunks.write().unwrap();
         let chunk_data = chunks.entry(chunk_pos).or_insert_with(ChunkData::new);
         chunk_data.blocks[idx] = block;
         chunk_data.version += 1;
-        
+
         if self.config.track_dirty {
             let mut dirty = self.dirty_regions.write().unwrap();
             dirty.insert(chunk_pos);
         }
-        
+
         Ok(())
     }
-    
+
     fn provider_name(&self) -> &str {
         "GridStoreProvider"
     }
-    
+
     fn is_writable(&self) -> bool {
         true
     }
@@ -446,7 +455,7 @@ pub struct BiomeBand {
     /// Latitude range (-1.0 to 1.0, where 0 is equator)
     pub lat_min: f32,
     pub lat_max: f32,
-    
+
     /// Biome type
     pub biome: BiomeType,
 }
@@ -456,19 +465,19 @@ pub struct BiomeBand {
 pub struct PlanetConfig {
     /// Random seed
     pub seed: u64,
-    
+
     /// Planet radius (in blocks)
     pub radius: f32,
-    
+
     /// Center position
     pub center: Vec3,
-    
+
     /// Noise layers (stacked)
     pub noise_stack: Vec<NoiseLayer>,
-    
+
     /// Biome bands
     pub biome_bands: Vec<BiomeBand>,
-    
+
     /// Sea level (relative to radius)
     pub sea_level: f32,
 }
@@ -522,30 +531,30 @@ impl PlanetProvider {
     pub fn new(config: PlanetConfig) -> Self {
         Self { config }
     }
-    
+
     /// Calculate signed distance to surface
     /// Negative = inside, Positive = outside
     pub fn signed_distance(&self, pos: Vec3) -> f32 {
         let relative = pos - self.config.center;
         let distance_from_center = relative.length();
-        
+
         // Basic sphere
         let base_distance = distance_from_center - self.config.radius;
-        
+
         // Add noise
         let noise = self.sample_noise(pos);
-        
+
         base_distance - noise
     }
-    
+
     /// Sample noise at position
     fn sample_noise(&self, pos: Vec3) -> f32 {
         let mut total = 0.0;
-        
+
         for layer in &self.config.noise_stack {
             let mut amplitude = layer.amplitude;
             let mut frequency = layer.frequency;
-            
+
             for _ in 0..layer.octaves {
                 let sample = Self::noise_3d(
                     pos.x * frequency,
@@ -553,47 +562,47 @@ impl PlanetProvider {
                     pos.z * frequency,
                     self.config.seed,
                 );
-                
+
                 total += sample * amplitude;
-                
+
                 amplitude *= layer.persistence;
                 frequency *= layer.lacunarity;
             }
         }
-        
+
         total
     }
-    
+
     /// Sample material at position
     pub fn sample_material(&self, pos: Vec3, _distance: f32) -> MaterialId {
         // Determine biome based on latitude
         let relative = pos - self.config.center;
         let latitude = (relative.y / relative.length()).clamp(-1.0, 1.0);
-        
+
         for band in &self.config.biome_bands {
             if latitude >= band.lat_min && latitude < band.lat_max {
                 return band.biome.surface_material();
             }
         }
-        
+
         crate::voxel_schema::MAT_STONE
     }
-    
+
     /// 3D noise function
     fn noise_3d(x: f32, y: f32, z: f32, seed: u64) -> f32 {
         let xi = x.floor() as i32;
         let yi = y.floor() as i32;
         let zi = z.floor() as i32;
-        
+
         let xf = x - xi as f32;
         let yf = y - yi as f32;
         let zf = z - zi as f32;
-        
+
         // Smooth interpolation
         let u = Self::smoothstep(xf);
         let v = Self::smoothstep(yf);
         let w = Self::smoothstep(zf);
-        
+
         // Sample corners of cube
         let c000 = Self::hash_3d(xi, yi, zi, seed);
         let c100 = Self::hash_3d(xi + 1, yi, zi, seed);
@@ -603,36 +612,37 @@ impl PlanetProvider {
         let c101 = Self::hash_3d(xi + 1, yi, zi + 1, seed);
         let c011 = Self::hash_3d(xi, yi + 1, zi + 1, seed);
         let c111 = Self::hash_3d(xi + 1, yi + 1, zi + 1, seed);
-        
+
         // Trilinear interpolation
         let x00 = Self::lerp(c000, c100, u);
         let x10 = Self::lerp(c010, c110, u);
         let x01 = Self::lerp(c001, c101, u);
         let x11 = Self::lerp(c011, c111, u);
-        
+
         let y0 = Self::lerp(x00, x10, v);
         let y1 = Self::lerp(x01, x11, v);
-        
+
         Self::lerp(y0, y1, w)
     }
-    
+
     /// Hash function for 3D coordinates
     fn hash_3d(x: i32, y: i32, z: i32, seed: u64) -> f32 {
-        let mut n = x.wrapping_mul(374761393)
+        let mut n = x
+            .wrapping_mul(374761393)
             .wrapping_add(y.wrapping_mul(668265263))
             .wrapping_add(z.wrapping_mul(2147483647))
             .wrapping_add(seed as i32);
         n = (n ^ (n >> 13)).wrapping_mul(1274126177);
         n = n ^ (n >> 16);
-        
+
         (n as f32 / i32::MAX as f32).clamp(-1.0, 1.0)
     }
-    
+
     /// Smoothstep function
     fn smoothstep(t: f32) -> f32 {
         t * t * (3.0 - 2.0 * t)
     }
-    
+
     /// Linear interpolation
     fn lerp(a: f32, b: f32, t: f32) -> f32 {
         a + (b - a) * t
@@ -642,22 +652,24 @@ impl PlanetProvider {
 impl VoxelProvider for PlanetProvider {
     fn read_range(&self, min: IVec3, max: IVec3, lod: u32) -> Result<VoxelData, ProviderError> {
         let step = 1 << lod; // LOD0 = 1, LOD1 = 2, LOD2 = 4, etc.
-        
+
         let size = (max - min + IVec3::ONE) / step;
         let mut data = VoxelData::new(size);
-        
+
         for z in 0..size.z {
             for y in 0..size.y {
                 for x in 0..size.x {
                     let world_pos = min + IVec3::new(x, y, z) * step;
-                    let pos_f = Vec3::new(world_pos.x as f32, world_pos.y as f32, world_pos.z as f32);
-                    
+                    let pos_f =
+                        Vec3::new(world_pos.x as f32, world_pos.y as f32, world_pos.z as f32);
+
                     let distance = self.signed_distance(pos_f);
-                    
+
                     let value = if distance < 0.0 {
                         // Inside planet
                         let material = self.sample_material(pos_f, distance);
-                        let density = ((1.0 - (distance / 10.0).abs()) * 255.0).clamp(0.0, 255.0) as u8;
+                        let density =
+                            ((1.0 - (distance / 10.0).abs()) * 255.0).clamp(0.0, 255.0) as u8;
                         VoxelValue::Density(density, material)
                     } else if pos_f.distance(self.config.center) < self.config.sea_level {
                         // Below sea level but above surface
@@ -666,23 +678,23 @@ impl VoxelProvider for PlanetProvider {
                         // Air
                         VoxelValue::Block(crate::chunk::AIR)
                     };
-                    
+
                     data.set(x, y, z, value);
                 }
             }
         }
-        
+
         Ok(data)
     }
-    
+
     fn write_voxel(&mut self, _pos: IVec3, _value: VoxelValue) -> Result<(), ProviderError> {
         Err(ProviderError::ReadOnly)
     }
-    
+
     fn provider_name(&self) -> &str {
         "PlanetProvider"
     }
-    
+
     fn is_writable(&self) -> bool {
         false
     }
@@ -697,10 +709,10 @@ impl VoxelProvider for PlanetProvider {
 pub enum NoiseMode {
     /// Standard Perlin noise
     Standard,
-    
+
     /// Ridge noise (absolute value for sharp edges)
     Ridge,
-    
+
     /// Billowy (squared for puffy clouds)
     Billowy,
 }
@@ -730,19 +742,19 @@ impl Default for NoiseParams {
 pub struct AsteroidConfig {
     /// Unique seed per asteroid
     pub seed: u64,
-    
+
     /// Approximate size (radius)
     pub size: f32,
-    
+
     /// Center position
     pub center: Vec3,
-    
+
     /// Density threshold (0.0-1.0)
     pub density_threshold: f32,
-    
+
     /// Noise mode
     pub noise_mode: NoiseMode,
-    
+
     /// Noise parameters
     pub noise_params: NoiseParams,
 }
@@ -770,20 +782,20 @@ impl AsteroidProvider {
     pub fn new(config: AsteroidConfig) -> Self {
         Self { config }
     }
-    
+
     /// Calculate density at position (0.0 = empty, 1.0 = solid)
     pub fn density_at(&self, pos: Vec3) -> f32 {
         let relative = pos - self.config.center;
         let distance = relative.length();
-        
+
         // Base sphere falloff
         let base_density = 1.0 - (distance / self.config.size).clamp(0.0, 1.0);
-        
+
         // Add noise
         let mut noise_value = 0.0;
         let mut amplitude = 1.0;
         let mut frequency = self.config.noise_params.frequency;
-        
+
         for _ in 0..self.config.noise_params.octaves {
             let sample = PlanetProvider::noise_3d(
                 relative.x * frequency,
@@ -791,23 +803,23 @@ impl AsteroidProvider {
                 relative.z * frequency,
                 self.config.seed,
             );
-            
+
             let modified = match self.config.noise_mode {
                 NoiseMode::Standard => sample,
                 NoiseMode::Ridge => 1.0 - sample.abs() * 2.0,
                 NoiseMode::Billowy => sample * sample,
             };
-            
+
             noise_value += modified * amplitude;
-            
+
             amplitude *= self.config.noise_params.persistence;
             frequency *= self.config.noise_params.lacunarity;
         }
-        
+
         // Combine base density with noise
         (base_density + noise_value * 0.3).clamp(0.0, 1.0)
     }
-    
+
     /// Check if position is solid
     pub fn is_solid(&self, pos: Vec3) -> bool {
         self.density_at(pos) > self.config.density_threshold
@@ -817,41 +829,42 @@ impl AsteroidProvider {
 impl VoxelProvider for AsteroidProvider {
     fn read_range(&self, min: IVec3, max: IVec3, lod: u32) -> Result<VoxelData, ProviderError> {
         let step = 1 << lod;
-        
+
         let size = (max - min + IVec3::ONE) / step;
         let mut data = VoxelData::new(size);
-        
+
         for z in 0..size.z {
             for y in 0..size.y {
                 for x in 0..size.x {
                     let world_pos = min + IVec3::new(x, y, z) * step;
-                    let pos_f = Vec3::new(world_pos.x as f32, world_pos.y as f32, world_pos.z as f32);
-                    
+                    let pos_f =
+                        Vec3::new(world_pos.x as f32, world_pos.y as f32, world_pos.z as f32);
+
                     let density = self.density_at(pos_f);
-                    
+
                     let value = if density > self.config.density_threshold {
                         let density_u8 = (density * 255.0) as u8;
                         VoxelValue::Density(density_u8, crate::voxel_schema::MAT_STONE)
                     } else {
                         VoxelValue::Block(crate::chunk::AIR)
                     };
-                    
+
                     data.set(x, y, z, value);
                 }
             }
         }
-        
+
         Ok(data)
     }
-    
+
     fn write_voxel(&mut self, _pos: IVec3, _value: VoxelValue) -> Result<(), ProviderError> {
         Err(ProviderError::ReadOnly)
     }
-    
+
     fn provider_name(&self) -> &str {
         "AsteroidProvider"
     }
-    
+
     fn is_writable(&self) -> bool {
         false
     }
@@ -861,18 +874,18 @@ impl VoxelProvider for AsteroidProvider {
 // DeltaStore - Sparse edit overlay
 // ============================================================================
 
+use std::io::{self, Read, Write};
 use std::path::Path;
-use std::io::{self, Write, Read};
 
 /// Eviction policy for delta store
 #[derive(Debug, Clone)]
 pub enum EvictionPolicy {
     /// Least Recently Used
     LRU,
-    
+
     /// Spatial LRU (avoid evicting chunks near player)
     SpatialLRU { player_pos: Vec3, radius: f32 },
-    
+
     /// Never evict
     Never,
 }
@@ -882,13 +895,13 @@ pub enum EvictionPolicy {
 pub struct GCConfig {
     /// Max delta chunks before GC
     pub max_delta_chunks: usize,
-    
+
     /// Eviction policy
     pub eviction_policy: EvictionPolicy,
-    
+
     /// Auto flush to disk
     pub auto_flush: bool,
-    
+
     /// Flush interval (seconds)
     pub flush_interval: f32,
 }
@@ -909,10 +922,10 @@ impl Default for GCConfig {
 pub struct DeltaChunk {
     /// Modifications (local index -> value)
     modifications: HashMap<usize, VoxelValue>,
-    
+
     /// Last modified time
     last_modified: Instant,
-    
+
     /// Dirty flag
     dirty: bool,
 }
@@ -925,7 +938,7 @@ impl DeltaChunk {
             dirty: true,
         }
     }
-    
+
     fn set(&mut self, local_idx: usize, value: VoxelValue) {
         self.modifications.insert(local_idx, value);
         self.last_modified = Instant::now();
@@ -945,13 +958,13 @@ pub struct DeltaStats {
 pub struct DeltaStore {
     /// Sparse delta chunks
     deltas: HashMap<IVec3, DeltaChunk>,
-    
+
     /// GC configuration
     gc_config: GCConfig,
-    
+
     /// Last GC time
     last_gc: Instant,
-    
+
     /// Last flush time
     last_flush: Instant,
 }
@@ -966,7 +979,7 @@ impl DeltaStore {
             last_flush: Instant::now(),
         }
     }
-    
+
     /// Set voxel
     pub fn set_voxel(&mut self, pos: IVec3, value: VoxelValue) {
         let chunk_pos = IVec3::new(
@@ -974,14 +987,16 @@ impl DeltaStore {
             pos.y.div_euclid(CHUNK_SIZE as i32),
             pos.z.div_euclid(CHUNK_SIZE as i32),
         );
-        
+
         let local = pos - chunk_pos * CHUNK_SIZE as i32;
-        let local_idx = (local.x + local.y * CHUNK_SIZE as i32 + local.z * CHUNK_SIZE as i32 * CHUNK_SIZE as i32) as usize;
-        
+        let local_idx = (local.x
+            + local.y * CHUNK_SIZE as i32
+            + local.z * CHUNK_SIZE as i32 * CHUNK_SIZE as i32) as usize;
+
         let delta = self.deltas.entry(chunk_pos).or_insert_with(DeltaChunk::new);
         delta.set(local_idx, value);
     }
-    
+
     /// Apply deltas to voxel data
     pub fn apply_to(&self, data: &mut VoxelData, min: IVec3, max: IVec3) {
         // Calculate which chunks overlap with this region
@@ -995,25 +1010,29 @@ impl DeltaStore {
             max.y.div_euclid(CHUNK_SIZE as i32),
             max.z.div_euclid(CHUNK_SIZE as i32),
         );
-        
+
         for cz in min_chunk.z..=max_chunk.z {
             for cy in min_chunk.y..=max_chunk.y {
                 for cx in min_chunk.x..=max_chunk.x {
                     let chunk_pos = IVec3::new(cx, cy, cz);
-                    
+
                     if let Some(delta) = self.deltas.get(&chunk_pos) {
                         // Apply modifications from this chunk
                         for (&local_idx, &value) in &delta.modifications {
                             let local_x = (local_idx % CHUNK_SIZE) as i32;
                             let local_y = ((local_idx / CHUNK_SIZE) % CHUNK_SIZE) as i32;
                             let local_z = (local_idx / (CHUNK_SIZE * CHUNK_SIZE)) as i32;
-                            
-                            let world_pos = chunk_pos * CHUNK_SIZE as i32 + IVec3::new(local_x, local_y, local_z);
-                            
+
+                            let world_pos = chunk_pos * CHUNK_SIZE as i32
+                                + IVec3::new(local_x, local_y, local_z);
+
                             // Check if this world pos is in the requested range
-                            if world_pos.x >= min.x && world_pos.x <= max.x
-                                && world_pos.y >= min.y && world_pos.y <= max.y
-                                && world_pos.z >= min.z && world_pos.z <= max.z
+                            if world_pos.x >= min.x
+                                && world_pos.x <= max.x
+                                && world_pos.y >= min.y
+                                && world_pos.y <= max.y
+                                && world_pos.z >= min.z
+                                && world_pos.z <= max.z
                             {
                                 let data_pos = world_pos - min;
                                 data.set(data_pos.x, data_pos.y, data_pos.z, value);
@@ -1024,23 +1043,25 @@ impl DeltaStore {
             }
         }
     }
-    
+
     /// Run garbage collection
     pub fn gc(&mut self) {
         if self.deltas.len() <= self.gc_config.max_delta_chunks {
             return;
         }
-        
+
         let to_remove = self.deltas.len() - self.gc_config.max_delta_chunks;
-        
+
         match &self.gc_config.eviction_policy {
             EvictionPolicy::LRU => {
                 // Sort by last modified time
-                let mut entries: Vec<_> = self.deltas.iter()
+                let mut entries: Vec<_> = self
+                    .deltas
+                    .iter()
                     .map(|(pos, chunk)| (*pos, chunk.last_modified))
                     .collect();
                 entries.sort_by_key(|(_, time)| *time);
-                
+
                 // Remove oldest
                 for i in 0..to_remove.min(entries.len()) {
                     self.deltas.remove(&entries[i].0);
@@ -1048,7 +1069,9 @@ impl DeltaStore {
             }
             EvictionPolicy::SpatialLRU { player_pos, radius } => {
                 // Sort by distance from player, then by time
-                let mut entries: Vec<_> = self.deltas.iter()
+                let mut entries: Vec<_> = self
+                    .deltas
+                    .iter()
                     .map(|(pos, chunk)| {
                         let chunk_center = Vec3::new(
                             (pos.x * CHUNK_SIZE as i32 + CHUNK_SIZE as i32 / 2) as f32,
@@ -1059,13 +1082,13 @@ impl DeltaStore {
                         (*pos, dist, chunk.last_modified)
                     })
                     .collect();
-                
+
                 // Only evict chunks outside radius
                 entries.retain(|(_, dist, _)| *dist > *radius);
                 entries.sort_by(|(_, d1, t1), (_, d2, t2)| {
                     d2.partial_cmp(d1).unwrap().then(t1.cmp(t2))
                 });
-                
+
                 for i in 0..to_remove.min(entries.len()) {
                     self.deltas.remove(&entries[i].0);
                 }
@@ -1074,33 +1097,33 @@ impl DeltaStore {
                 // Don't evict anything
             }
         }
-        
+
         self.last_gc = Instant::now();
     }
-    
+
     /// Flush to disk
     pub fn flush_to_disk(&mut self, path: &Path) -> Result<(), io::Error> {
         let mut file = std::fs::File::create(path)?;
-        
+
         // Header
         file.write_all(b"DLTA")?; // Magic
         file.write_all(&1u32.to_le_bytes())?; // Version
         file.write_all(&(self.deltas.len() as u32).to_le_bytes())?; // Chunk count
-        
+
         // Write each chunk
         for (chunk_pos, delta) in &self.deltas {
             // Chunk position
             file.write_all(&chunk_pos.x.to_le_bytes())?;
             file.write_all(&chunk_pos.y.to_le_bytes())?;
             file.write_all(&chunk_pos.z.to_le_bytes())?;
-            
+
             // Modification count
             file.write_all(&(delta.modifications.len() as u32).to_le_bytes())?;
-            
+
             // Write modifications
             for (&idx, &value) in &delta.modifications {
                 file.write_all(&(idx as u32).to_le_bytes())?;
-                
+
                 match value {
                     VoxelValue::Block(block) => {
                         file.write_all(&0u8.to_le_bytes())?; // Type: Block
@@ -1114,33 +1137,33 @@ impl DeltaStore {
                 }
             }
         }
-        
+
         self.last_flush = Instant::now();
-        
+
         Ok(())
     }
-    
+
     /// Load from disk
     pub fn load_from_disk(path: &Path) -> Result<Self, io::Error> {
         let mut file = std::fs::File::open(path)?;
-        
+
         // Read header
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic)?;
         if &magic != b"DLTA" {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid magic"));
         }
-        
+
         let mut version_bytes = [0u8; 4];
         file.read_exact(&mut version_bytes)?;
         let _version = u32::from_le_bytes(version_bytes);
-        
+
         let mut count_bytes = [0u8; 4];
         file.read_exact(&mut count_bytes)?;
         let chunk_count = u32::from_le_bytes(count_bytes);
-        
+
         let mut store = Self::new(GCConfig::default());
-        
+
         // Read chunks
         for _ in 0..chunk_count {
             // Read chunk pos
@@ -1150,29 +1173,29 @@ impl DeltaStore {
             file.read_exact(&mut x_bytes)?;
             file.read_exact(&mut y_bytes)?;
             file.read_exact(&mut z_bytes)?;
-            
+
             let chunk_pos = IVec3::new(
                 i32::from_le_bytes(x_bytes),
                 i32::from_le_bytes(y_bytes),
                 i32::from_le_bytes(z_bytes),
             );
-            
+
             // Read modification count
             let mut mod_count_bytes = [0u8; 4];
             file.read_exact(&mut mod_count_bytes)?;
             let mod_count = u32::from_le_bytes(mod_count_bytes);
-            
+
             let mut delta = DeltaChunk::new();
-            
+
             // Read modifications
             for _ in 0..mod_count {
                 let mut idx_bytes = [0u8; 4];
                 file.read_exact(&mut idx_bytes)?;
                 let idx = u32::from_le_bytes(idx_bytes) as usize;
-                
+
                 let mut type_byte = [0u8; 1];
                 file.read_exact(&mut type_byte)?;
-                
+
                 let value = if type_byte[0] == 0 {
                     // Block
                     let mut block_bytes = [0u8; 2];
@@ -1186,35 +1209,36 @@ impl DeltaStore {
                     file.read_exact(&mut material_byte)?;
                     VoxelValue::Density(density_byte[0], material_byte[0])
                 };
-                
+
                 delta.modifications.insert(idx, value);
             }
-            
+
             store.deltas.insert(chunk_pos, delta);
         }
-        
+
         Ok(store)
     }
-    
+
     /// Get statistics
     pub fn stats(&self) -> DeltaStats {
         let mut total_mods = 0;
         let mut dirty_count = 0;
-        
+
         for delta in self.deltas.values() {
             total_mods += delta.modifications.len();
             if delta.dirty {
                 dirty_count += 1;
             }
         }
-        
+
         DeltaStats {
             total_deltas: total_mods,
-            memory_usage_bytes: total_mods * (std::mem::size_of::<usize>() + std::mem::size_of::<VoxelValue>()),
+            memory_usage_bytes: total_mods
+                * (std::mem::size_of::<usize>() + std::mem::size_of::<VoxelValue>()),
             dirty_chunks: dirty_count,
         }
     }
-    
+
     /// Clear all deltas
     pub fn clear(&mut self) {
         self.deltas.clear();
@@ -1225,7 +1249,7 @@ impl DeltaStore {
 pub struct ProviderWithEdits<P: VoxelProvider> {
     /// Base provider (read-only)
     base: Arc<P>,
-    
+
     /// Delta overlay
     delta: Arc<RwLock<DeltaStore>>,
 }
@@ -1238,7 +1262,7 @@ impl<P: VoxelProvider> ProviderWithEdits<P> {
             delta: Arc::new(RwLock::new(DeltaStore::new(gc_config))),
         }
     }
-    
+
     /// Get delta store (for save/load)
     pub fn delta(&self) -> Arc<RwLock<DeltaStore>> {
         self.delta.clone()
@@ -1249,24 +1273,24 @@ impl<P: VoxelProvider> VoxelProvider for ProviderWithEdits<P> {
     fn read_range(&self, min: IVec3, max: IVec3, lod: u32) -> Result<VoxelData, ProviderError> {
         // Read base data
         let mut data = self.base.read_range(min, max, lod)?;
-        
+
         // Apply deltas
         let delta = self.delta.read().unwrap();
         delta.apply_to(&mut data, min, max);
-        
+
         Ok(data)
     }
-    
+
     fn write_voxel(&mut self, pos: IVec3, value: VoxelValue) -> Result<(), ProviderError> {
         let mut delta = self.delta.write().unwrap();
         delta.set_voxel(pos, value);
         Ok(())
     }
-    
+
     fn provider_name(&self) -> &str {
         "ProviderWithEdits"
     }
-    
+
     fn is_writable(&self) -> bool {
         true
     }
@@ -1275,18 +1299,21 @@ impl<P: VoxelProvider> VoxelProvider for ProviderWithEdits<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_voxel_data() {
         let mut data = VoxelData::new(IVec3::new(10, 10, 10));
-        
+
         data.set(5, 5, 5, VoxelValue::Block(crate::chunk::STONE));
-        assert_eq!(data.get(5, 5, 5), Some(VoxelValue::Block(crate::chunk::STONE)));
-        
+        assert_eq!(
+            data.get(5, 5, 5),
+            Some(VoxelValue::Block(crate::chunk::STONE))
+        );
+
         // Out of bounds
         assert_eq!(data.get(100, 0, 0), None);
     }
-    
+
     #[test]
     fn test_brush_sphere() {
         let brush = Brush {
@@ -1294,42 +1321,49 @@ mod tests {
             size: 5.0,
             value: VoxelValue::Block(crate::chunk::STONE),
         };
-        
+
         let center = Vec3::new(0.0, 0.0, 0.0);
         assert!(brush.contains(center, Vec3::new(3.0, 0.0, 0.0)));
         assert!(!brush.contains(center, Vec3::new(10.0, 0.0, 0.0)));
     }
-    
+
     #[test]
     fn test_grid_store() {
         let mut store = GridStoreProvider::new(GridStoreConfig::default());
-        
+
         // Write voxel
-        store.write_voxel(IVec3::new(5, 5, 5), VoxelValue::Block(crate::chunk::STONE)).unwrap();
-        
+        store
+            .write_voxel(IVec3::new(5, 5, 5), VoxelValue::Block(crate::chunk::STONE))
+            .unwrap();
+
         // Read back
-        let data = store.read_range(IVec3::new(0, 0, 0), IVec3::new(10, 10, 10), 0).unwrap();
-        assert_eq!(data.get(5, 5, 5), Some(VoxelValue::Block(crate::chunk::STONE)));
-        
+        let data = store
+            .read_range(IVec3::new(0, 0, 0), IVec3::new(10, 10, 10), 0)
+            .unwrap();
+        assert_eq!(
+            data.get(5, 5, 5),
+            Some(VoxelValue::Block(crate::chunk::STONE))
+        );
+
         // Check dirty
         let dirty = store.take_dirty_chunks();
         assert_eq!(dirty.len(), 1);
     }
-    
+
     #[test]
     fn test_planet_deterministic() {
         let config = PlanetConfig::default();
-        
+
         let planet1 = PlanetProvider::new(config.clone());
         let planet2 = PlanetProvider::new(config);
-        
+
         let pos = Vec3::new(100.0, 200.0, 300.0);
         let dist1 = planet1.signed_distance(pos);
         let dist2 = planet2.signed_distance(pos);
-        
+
         assert_eq!(dist1, dist2);
     }
-    
+
     #[test]
     fn test_planet_read_range() {
         let center_pos = Vec3::new(0.0, 1000.0, 0.0);
@@ -1338,27 +1372,30 @@ mod tests {
             center: center_pos,
             ..Default::default()
         };
-        
+
         let planet = PlanetProvider::new(config);
-        
+
         // Test at the exact center of the planet (should be solid)
         let center_dist = planet.signed_distance(center_pos);
         println!("Distance at planet center: {}", center_dist);
-        
+
         // Test at a point clearly inside (y=1000 - radius/2)
         let inside_point = Vec3::new(0.0, 500.0, 0.0);
         let inside_dist = planet.signed_distance(inside_point);
         println!("Distance at inside point: {}", inside_dist);
-        
+
         // Test at surface
         let surface_point = Vec3::new(0.0, 0.0, 0.0);
         let surface_dist = planet.signed_distance(surface_point);
         println!("Distance at surface: {}", surface_dist);
-        
+
         // Just verify the planet provider works
-        assert!(center_dist < 0.0, "Center should be inside (negative distance)");
+        assert!(
+            center_dist < 0.0,
+            "Center should be inside (negative distance)"
+        );
     }
-    
+
     #[test]
     fn test_asteroid_generation() {
         let config = AsteroidConfig {
@@ -1366,34 +1403,37 @@ mod tests {
             center: Vec3::ZERO,
             ..Default::default()
         };
-        
+
         let asteroid = AsteroidProvider::new(config);
-        
+
         // Center should be solid
         assert!(asteroid.is_solid(Vec3::ZERO));
-        
+
         // Far away should be empty
         assert!(!asteroid.is_solid(Vec3::new(100.0, 100.0, 100.0)));
     }
-    
+
     #[test]
     fn test_delta_store() {
         let mut delta = DeltaStore::new(GCConfig::default());
-        
+
         // Set voxel
         delta.set_voxel(IVec3::new(5, 5, 5), VoxelValue::Block(crate::chunk::STONE));
-        
+
         // Apply to data
         let mut data = VoxelData::new(IVec3::new(10, 10, 10));
         delta.apply_to(&mut data, IVec3::ZERO, IVec3::new(10, 10, 10));
-        
-        assert_eq!(data.get(5, 5, 5), Some(VoxelValue::Block(crate::chunk::STONE)));
-        
+
+        assert_eq!(
+            data.get(5, 5, 5),
+            Some(VoxelValue::Block(crate::chunk::STONE))
+        );
+
         // Stats
         let stats = delta.stats();
         assert_eq!(stats.total_deltas, 1);
     }
-    
+
     #[test]
     fn test_provider_with_edits() {
         let planet = Arc::new(PlanetProvider::new(PlanetConfig {
@@ -1401,55 +1441,62 @@ mod tests {
             center: Vec3::ZERO,
             ..Default::default()
         }));
-        
+
         let mut provider = ProviderWithEdits::new(planet, GCConfig::default());
-        
+
         // Read before edit
-        let before = provider.read_range(
-            IVec3::new(0, 0, 0),
-            IVec3::new(5, 5, 5),
-            0
-        ).unwrap();
-        
+        let before = provider
+            .read_range(IVec3::new(0, 0, 0), IVec3::new(5, 5, 5), 0)
+            .unwrap();
+
         // Edit
-        provider.write_voxel(IVec3::new(3, 3, 3), VoxelValue::Block(crate::chunk::AIR)).unwrap();
-        
+        provider
+            .write_voxel(IVec3::new(3, 3, 3), VoxelValue::Block(crate::chunk::AIR))
+            .unwrap();
+
         // Read after edit
-        let after = provider.read_range(
-            IVec3::new(0, 0, 0),
-            IVec3::new(5, 5, 5),
-            0
-        ).unwrap();
-        
+        let after = provider
+            .read_range(IVec3::new(0, 0, 0), IVec3::new(5, 5, 5), 0)
+            .unwrap();
+
         // Should be different
         assert_ne!(before.get(3, 3, 3), after.get(3, 3, 3));
-        assert_eq!(after.get(3, 3, 3), Some(VoxelValue::Block(crate::chunk::AIR)));
+        assert_eq!(
+            after.get(3, 3, 3),
+            Some(VoxelValue::Block(crate::chunk::AIR))
+        );
     }
-    
+
     #[test]
     fn test_delta_save_load() {
         let temp_path = std::env::temp_dir().join("test_delta.bin");
-        
+
         // Create and save
         {
             let mut delta = DeltaStore::new(GCConfig::default());
-            delta.set_voxel(IVec3::new(10, 20, 30), VoxelValue::Block(crate::chunk::STONE));
-            delta.set_voxel(IVec3::new(40, 50, 60), VoxelValue::Density(200, crate::voxel_schema::MAT_DIRT));
-            
+            delta.set_voxel(
+                IVec3::new(10, 20, 30),
+                VoxelValue::Block(crate::chunk::STONE),
+            );
+            delta.set_voxel(
+                IVec3::new(40, 50, 60),
+                VoxelValue::Density(200, crate::voxel_schema::MAT_DIRT),
+            );
+
             delta.flush_to_disk(&temp_path).unwrap();
         }
-        
+
         // Load
         {
             let loaded = DeltaStore::load_from_disk(&temp_path).unwrap();
             let stats = loaded.stats();
             assert_eq!(stats.total_deltas, 2);
         }
-        
+
         // Cleanup
         let _ = std::fs::remove_file(temp_path);
     }
-    
+
     #[test]
     fn test_gc_lru() {
         let mut delta = DeltaStore::new(GCConfig {
@@ -1457,30 +1504,30 @@ mod tests {
             eviction_policy: EvictionPolicy::LRU,
             ..Default::default()
         });
-        
+
         // Add 3 chunks
         delta.set_voxel(IVec3::new(0, 0, 0), VoxelValue::Block(crate::chunk::STONE));
         std::thread::sleep(std::time::Duration::from_millis(10));
-        
+
         delta.set_voxel(IVec3::new(32, 0, 0), VoxelValue::Block(crate::chunk::STONE));
         std::thread::sleep(std::time::Duration::from_millis(10));
-        
+
         delta.set_voxel(IVec3::new(64, 0, 0), VoxelValue::Block(crate::chunk::STONE));
-        
+
         // Should have 3 chunks
         assert_eq!(delta.deltas.len(), 3);
-        
+
         // Run GC
         delta.gc();
-        
+
         // Should have 2 chunks (oldest evicted)
         assert_eq!(delta.deltas.len(), 2);
     }
-    
+
     // ========================================================================
     // Acceptance Tests
     // ========================================================================
-    
+
     #[test]
     fn acceptance_deterministic_reads() {
         let config = PlanetConfig {
@@ -1488,33 +1535,35 @@ mod tests {
             radius: 100.0,
             ..Default::default()
         };
-        
+
         let planet1 = PlanetProvider::new(config.clone());
         let planet2 = PlanetProvider::new(config);
-        
-        let data1 = planet1.read_range(
-            IVec3::new(-10, -10, -10),
-            IVec3::new(10, 10, 10),
-            0
-        ).unwrap();
-        
-        let data2 = planet2.read_range(
-            IVec3::new(-10, -10, -10),
-            IVec3::new(10, 10, 10),
-            0
-        ).unwrap();
-        
+
+        let data1 = planet1
+            .read_range(IVec3::new(-10, -10, -10), IVec3::new(10, 10, 10), 0)
+            .unwrap();
+
+        let data2 = planet2
+            .read_range(IVec3::new(-10, -10, -10), IVec3::new(10, 10, 10), 0)
+            .unwrap();
+
         // Compare all voxels
         for z in 0..21 {
             for y in 0..21 {
                 for x in 0..21 {
-                    assert_eq!(data1.get(x, y, z), data2.get(x, y, z),
-                        "Mismatch at ({}, {}, {})", x, y, z);
+                    assert_eq!(
+                        data1.get(x, y, z),
+                        data2.get(x, y, z),
+                        "Mismatch at ({}, {}, {})",
+                        x,
+                        y,
+                        z
+                    );
                 }
             }
         }
     }
-    
+
     #[test]
     fn acceptance_edits_override_base() {
         let planet = Arc::new(PlanetProvider::new(PlanetConfig {
@@ -1522,115 +1571,105 @@ mod tests {
             center: Vec3::ZERO,
             ..Default::default()
         }));
-        
+
         let mut provider = ProviderWithEdits::new(planet, GCConfig::default());
-        
+
         let pos = IVec3::new(10, 10, 10);
-        
+
         // Read original
         let original = provider.read_range(pos, pos, 0).unwrap();
         let original_val = original.get(0, 0, 0).unwrap();
-        
+
         // Modify
         let new_val = VoxelValue::Block(crate::chunk::AIR);
         provider.write_voxel(pos, new_val).unwrap();
-        
+
         // Read modified
         let modified = provider.read_range(pos, pos, 0).unwrap();
         let modified_val = modified.get(0, 0, 0).unwrap();
-        
+
         // Should be different
         assert_ne!(original_val, modified_val);
         assert_eq!(modified_val, new_val);
     }
-    
+
     #[test]
     fn acceptance_survive_reload() {
         let temp_path = std::env::temp_dir().join("test_persist.bin");
-        
+
         let planet = Arc::new(PlanetProvider::new(PlanetConfig::default()));
         let pos = IVec3::new(15, 15, 15);
         let edited_value = VoxelValue::Block(crate::chunk::GLASS);
-        
+
         // Create, edit, and save
         {
             let mut provider = ProviderWithEdits::new(planet.clone(), GCConfig::default());
             provider.write_voxel(pos, edited_value).unwrap();
-            
+
             let delta = provider.delta();
             let mut delta_lock = delta.write().unwrap();
             delta_lock.flush_to_disk(&temp_path).unwrap();
         }
-        
+
         // Reload and verify
         {
             let loaded_delta = DeltaStore::load_from_disk(&temp_path).unwrap();
-            
+
             // Create a new provider with the loaded delta
             let provider_with_loaded_delta = ProviderWithEdits {
                 base: planet,
                 delta: Arc::new(RwLock::new(loaded_delta)),
             };
-            
+
             let data = provider_with_loaded_delta.read_range(pos, pos, 0).unwrap();
             assert_eq!(data.get(0, 0, 0), Some(edited_value));
         }
-        
+
         // Cleanup
         let _ = std::fs::remove_file(temp_path);
     }
-    
+
     #[test]
     fn acceptance_read_64_cubed_perf() {
         let planet = PlanetProvider::new(PlanetConfig {
             radius: 1000.0,
             ..Default::default()
         });
-        
+
         let start = Instant::now();
-        let _data = planet.read_range(
-            IVec3::ZERO,
-            IVec3::splat(63), // 64³ voxels
-            0
-        ).unwrap();
+        let _data = planet
+            .read_range(
+                IVec3::ZERO,
+                IVec3::splat(63), // 64³ voxels
+                0,
+            )
+            .unwrap();
         let elapsed = start.elapsed();
-        
+
         println!("Read 64³ region in {:?}", elapsed);
-        
+
         // Should be reasonably fast (< 100ms)
         // Note: This depends on CPU, so we're lenient
         assert!(elapsed.as_millis() < 500, "Too slow: {:?}", elapsed);
     }
-    
+
     #[test]
     fn test_lod_sampling() {
         let planet = PlanetProvider::new(PlanetConfig {
             radius: 100.0,
             ..Default::default()
         });
-        
+
         // LOD 0: Full resolution
-        let lod0 = planet.read_range(
-            IVec3::ZERO,
-            IVec3::splat(31),
-            0
-        ).unwrap();
+        let lod0 = planet.read_range(IVec3::ZERO, IVec3::splat(31), 0).unwrap();
         assert_eq!(lod0.size, IVec3::splat(32));
-        
+
         // LOD 1: Half resolution
-        let lod1 = planet.read_range(
-            IVec3::ZERO,
-            IVec3::splat(31),
-            1
-        ).unwrap();
+        let lod1 = planet.read_range(IVec3::ZERO, IVec3::splat(31), 1).unwrap();
         assert_eq!(lod1.size, IVec3::splat(16));
-        
+
         // LOD 2: Quarter resolution
-        let lod2 = planet.read_range(
-            IVec3::ZERO,
-            IVec3::splat(31),
-            2
-        ).unwrap();
+        let lod2 = planet.read_range(IVec3::ZERO, IVec3::splat(31), 2).unwrap();
         assert_eq!(lod2.size, IVec3::splat(8));
     }
 }

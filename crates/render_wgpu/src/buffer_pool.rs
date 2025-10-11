@@ -1,5 +1,5 @@
 //! GPU buffer pool for efficient vertex/index buffer recycling
-//! 
+//!
 //! Avoids frequent GPU allocations by reusing buffers
 
 use crate::wgpu;
@@ -8,20 +8,20 @@ use std::collections::VecDeque;
 /// A pooled buffer entry
 pub struct PooledBuffer {
     pub buffer: wgpu::Buffer,
-    pub capacity: u64,  // Size in bytes
+    pub capacity: u64, // Size in bytes
 }
 
 /// Pool for recycling GPU buffers
 pub struct BufferPool {
     /// Available vertex buffers (sorted by capacity)
     vertex_buffers: VecDeque<PooledBuffer>,
-    
+
     /// Available index buffers (sorted by capacity)
     index_buffers: VecDeque<PooledBuffer>,
-    
+
     /// Maximum pool size per type
     max_pool_size: usize,
-    
+
     /// Statistics
     pub stats: PoolStats,
 }
@@ -45,7 +45,7 @@ impl BufferPool {
             stats: PoolStats::default(),
         }
     }
-    
+
     /// Acquire a vertex buffer (reuse from pool or create new)
     pub fn acquire_vertex_buffer(
         &mut self,
@@ -53,13 +53,17 @@ impl BufferPool {
         required_size: u64,
     ) -> wgpu::Buffer {
         // Try to find a buffer with sufficient capacity
-        if let Some(pos) = self.vertex_buffers.iter().position(|b| b.capacity >= required_size) {
+        if let Some(pos) = self
+            .vertex_buffers
+            .iter()
+            .position(|b| b.capacity >= required_size)
+        {
             let pooled = self.vertex_buffers.remove(pos).unwrap();
             self.stats.vertex_reuses += 1;
             self.update_stats();
             return pooled.buffer;
         }
-        
+
         // No suitable buffer found, create new one
         self.stats.vertex_allocations += 1;
         device.create_buffer(&wgpu::BufferDescriptor {
@@ -69,7 +73,7 @@ impl BufferPool {
             mapped_at_creation: false,
         })
     }
-    
+
     /// Acquire an index buffer (reuse from pool or create new)
     pub fn acquire_index_buffer(
         &mut self,
@@ -77,13 +81,17 @@ impl BufferPool {
         required_size: u64,
     ) -> wgpu::Buffer {
         // Try to find a buffer with sufficient capacity
-        if let Some(pos) = self.index_buffers.iter().position(|b| b.capacity >= required_size) {
+        if let Some(pos) = self
+            .index_buffers
+            .iter()
+            .position(|b| b.capacity >= required_size)
+        {
             let pooled = self.index_buffers.remove(pos).unwrap();
             self.stats.index_reuses += 1;
             self.update_stats();
             return pooled.buffer;
         }
-        
+
         // No suitable buffer found, create new one
         self.stats.index_allocations += 1;
         device.create_buffer(&wgpu::BufferDescriptor {
@@ -93,47 +101,49 @@ impl BufferPool {
             mapped_at_creation: false,
         })
     }
-    
+
     /// Return a vertex buffer to the pool
     pub fn return_vertex_buffer(&mut self, buffer: wgpu::Buffer, capacity: u64) {
         if self.vertex_buffers.len() < self.max_pool_size {
-            self.vertex_buffers.push_back(PooledBuffer { buffer, capacity });
+            self.vertex_buffers
+                .push_back(PooledBuffer { buffer, capacity });
             self.update_stats();
         }
         // Otherwise, buffer is dropped and freed
     }
-    
+
     /// Return an index buffer to the pool
     pub fn return_index_buffer(&mut self, buffer: wgpu::Buffer, capacity: u64) {
         if self.index_buffers.len() < self.max_pool_size {
-            self.index_buffers.push_back(PooledBuffer { buffer, capacity });
+            self.index_buffers
+                .push_back(PooledBuffer { buffer, capacity });
             self.update_stats();
         }
         // Otherwise, buffer is dropped and freed
     }
-    
+
     /// Clear all buffers from pool
     pub fn clear(&mut self) {
         self.vertex_buffers.clear();
         self.index_buffers.clear();
         self.update_stats();
     }
-    
+
     fn update_stats(&mut self) {
         self.stats.vertex_buffers_in_pool = self.vertex_buffers.len();
         self.stats.index_buffers_in_pool = self.index_buffers.len();
     }
-    
+
     /// Get reuse rate (0.0 to 1.0)
     pub fn reuse_rate(&self) -> f32 {
         let total_vertex = self.stats.vertex_allocations + self.stats.vertex_reuses;
         let total_index = self.stats.index_allocations + self.stats.index_reuses;
         let total = total_vertex + total_index;
-        
+
         if total == 0 {
             return 0.0;
         }
-        
+
         let reuses = self.stats.vertex_reuses + self.stats.index_reuses;
         reuses as f32 / total as f32
     }

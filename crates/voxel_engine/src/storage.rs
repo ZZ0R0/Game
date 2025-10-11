@@ -9,10 +9,10 @@ use std::collections::VecDeque;
 pub struct ChunkPool {
     /// Available chunks ready to be reused
     available: VecDeque<Chunk>,
-    
+
     /// Maximum pool size
     max_size: usize,
-    
+
     /// Statistics
     pub stats: ChunkPoolStats,
 }
@@ -32,7 +32,7 @@ impl ChunkPool {
             stats: ChunkPoolStats::default(),
         }
     }
-    
+
     /// Acquire a chunk from the pool (or allocate new one)
     pub fn acquire(&mut self, position: IVec3) -> Chunk {
         if let Some(mut chunk) = self.available.pop_front() {
@@ -47,7 +47,7 @@ impl ChunkPool {
             Chunk::new(position)
         }
     }
-    
+
     /// Return a chunk to the pool for reuse
     pub fn release(&mut self, chunk: Chunk) {
         if self.available.len() < self.max_size {
@@ -56,13 +56,13 @@ impl ChunkPool {
         }
         // If pool is full, chunk is dropped (deallocated)
     }
-    
+
     /// Clear the entire pool
     pub fn clear(&mut self) {
         self.available.clear();
         self.update_stats();
     }
-    
+
     /// Pre-allocate chunks to warm up the pool
     pub fn preallocate(&mut self, count: usize) {
         for _ in 0..count.min(self.max_size) {
@@ -71,7 +71,7 @@ impl ChunkPool {
         }
         self.update_stats();
     }
-    
+
     fn update_stats(&mut self) {
         self.stats.available_chunks = self.available.len();
     }
@@ -87,10 +87,10 @@ impl Default for ChunkPool {
 pub struct MeshPool {
     /// Available mesh data ready to be reused
     available: VecDeque<MeshData>,
-    
+
     /// Maximum pool size
     max_size: usize,
-    
+
     /// Statistics
     pub stats: MeshPoolStats,
 }
@@ -110,7 +110,7 @@ impl MeshPool {
             stats: MeshPoolStats::default(),
         }
     }
-    
+
     /// Acquire a mesh from the pool (or allocate new one)
     pub fn acquire(&mut self) -> MeshData {
         if let Some(mut mesh) = self.available.pop_front() {
@@ -133,7 +133,7 @@ impl MeshPool {
             }
         }
     }
-    
+
     /// Return a mesh to the pool for reuse
     pub fn release(&mut self, mesh: MeshData) {
         if self.available.len() < self.max_size {
@@ -142,13 +142,13 @@ impl MeshPool {
         }
         // If pool is full, mesh is dropped (deallocated)
     }
-    
+
     /// Clear the entire pool
     pub fn clear(&mut self) {
         self.available.clear();
         self.update_stats();
     }
-    
+
     /// Pre-allocate meshes to warm up the pool
     pub fn preallocate(&mut self, count: usize, capacity: usize) {
         for _ in 0..count.min(self.max_size) {
@@ -162,7 +162,7 @@ impl MeshPool {
         }
         self.update_stats();
     }
-    
+
     fn update_stats(&mut self) {
         self.stats.available_meshes = self.available.len();
     }

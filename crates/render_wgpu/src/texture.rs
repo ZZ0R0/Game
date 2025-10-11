@@ -27,13 +27,21 @@ pub fn make_checker_texture(
     let mut data = Vec::<u8>::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
-            let c = if ((x / 16) + (y / 16)) % 2 == 0 { 220 } else { 40 };
+            let c = if ((x / 16) + (y / 16)) % 2 == 0 {
+                220
+            } else {
+                40
+            };
             data.extend_from_slice(&[c, c, 255, 255]);
         }
     }
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("checker_tex"),
-        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -63,10 +71,23 @@ pub fn upload_rgba8(queue: &wgpu::Queue, tex: &wgpu::Texture, w: u32, h: u32, da
     let padded = row_bytes.div_ceil(align) * align;
     if padded == row_bytes {
         queue.write_texture(
-            wgpu::ImageCopyTexture { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::ImageCopyTexture {
+                texture: tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
             data,
-            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(row_bytes), rows_per_image: Some(h) },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(row_bytes),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         return;
     }
@@ -77,16 +98,28 @@ pub fn upload_rgba8(queue: &wgpu::Queue, tex: &wgpu::Texture, w: u32, h: u32, da
         dst.copy_from_slice(src);
     }
     queue.write_texture(
-        wgpu::ImageCopyTexture { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::ImageCopyTexture {
+            texture: tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
         &staged,
-        wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(h) },
-        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(padded),
+            rows_per_image: Some(h),
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
     );
 }
 
-
-use std::path::Path;
 use crate::gfx::Gfx;
+use std::path::Path;
 
 impl<'w> Gfx<'w> {
     pub fn load_texture_path(&mut self, path: &Path) -> Result<(), String> {
@@ -96,7 +129,11 @@ impl<'w> Gfx<'w> {
 
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("img_tex"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,

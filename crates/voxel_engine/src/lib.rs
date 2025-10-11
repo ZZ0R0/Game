@@ -2,75 +2,60 @@
 #![deny(warnings)]
 
 // ChunkV2: Modern chunk system with BlockId, palette, dirty flags, and world coordinates
+pub mod atlas;
 pub mod chunk;
 pub mod meshing;
 pub mod meshing_config;
-pub mod atlas;
 pub mod raycast;
 
 // New: Chunk loading system with async generation
 pub mod chunk_ring;
-pub mod job_queue;
 pub mod generator;
+pub mod job_queue;
 pub mod storage;
 
 // Milestone 1: Unified voxel model
-pub mod voxel_schema;
 pub mod volume;
+pub mod voxel_schema;
 
 // Milestone 2: Provider system
 pub mod providers;
 
 // Re-exports
 pub use chunk::{
-    Chunk,
-    ChunkManager,
-    BlockId,
-    DirtyFlags,
-    CHUNK_SIZE,
-    CHUNK_VOLUME,
-    AIR, STONE, DIRT, GRASS, WOOD, LEAVES, WATER, GLASS,
-    is_transparent, is_solid,
+    is_solid, is_transparent, BlockId, Chunk, ChunkManager, DirtyFlags, AIR, CHUNK_SIZE,
+    CHUNK_VOLUME, DIRT, GLASS, GRASS, LEAVES, STONE, WATER, WOOD,
 };
 
 pub use meshing::{
-    mesh_chunk_v2 as mesh_chunk, 
-    mesh_chunk_with_ao,
-    MeshPosUv,
-    MeshData,
-    SeparatedMesh,
-    greedy_mesh_chunk,
-    greedy_mesh_chunk_separated,
+    greedy_mesh_chunk, greedy_mesh_chunk_separated, mesh_chunk_v2 as mesh_chunk,
+    mesh_chunk_with_ao, MeshData, MeshPosUv, SeparatedMesh,
 };
 
-pub use atlas::{TextureAtlas, AtlasRect, FaceDir};
+pub use atlas::{AtlasRect, FaceDir, TextureAtlas};
 
 pub use raycast::{raycast_dda, RaycastHit};
 
-pub use chunk_ring::{ChunkRing, ChunkRingConfig, world_to_chunk, chunk_to_world};
-pub use job_queue::{JobQueue, JobWorker, WorkerHandle, ChunkJob, JobResult};
-pub use generator::{TerrainGenerator, TerrainConfig, Biome};
-pub use storage::{ChunkPool, MeshPool};
+pub use chunk_ring::{chunk_to_world, world_to_chunk, ChunkRing, ChunkRingConfig};
+pub use generator::{Biome, TerrainConfig, TerrainGenerator};
+pub use job_queue::{ChunkJob, JobQueue, JobResult, JobWorker, WorkerHandle};
 pub use meshing_config::MeshingConfig;
+pub use storage::{ChunkPool, MeshPool};
 
 // Milestone 1 exports
-pub use voxel_schema::{
-    VoxelSchema, BlockSchema, DensitySchema,
-    MaterialId, Density,
-    MAT_AIR, MAT_STONE, MAT_DIRT, MAT_GRASS, MAT_WOOD, MAT_WATER,
-};
 pub use volume::{
-    Volume, GridVolume, CelestialVolume,
-    VolumeTransform, DirtyRegions, ProceduralProvider,
-    world_to_chunk_pos,
+    world_to_chunk_pos, CelestialVolume, DirtyRegions, GridVolume, ProceduralProvider, Volume,
+    VolumeTransform,
+};
+pub use voxel_schema::{
+    BlockSchema, Density, DensitySchema, MaterialId, VoxelSchema, MAT_AIR, MAT_DIRT, MAT_GRASS,
+    MAT_STONE, MAT_WATER, MAT_WOOD,
 };
 
 // Milestone 2 exports
 pub use providers::{
-    VoxelProvider, VoxelValue, VoxelData, Brush, BrushShape,
-    ProviderError, GridStoreProvider, GridStoreConfig, ChunkData,
-    PlanetProvider, PlanetConfig, NoiseLayer, BiomeBand, BiomeType,
-    AsteroidProvider, AsteroidConfig, NoiseMode, NoiseParams,
-    DeltaStore, DeltaStats, GCConfig, EvictionPolicy,
-    ProviderWithEdits,
+    AsteroidConfig, AsteroidProvider, BiomeBand, BiomeType, Brush, BrushShape, ChunkData,
+    DeltaStats, DeltaStore, EvictionPolicy, GCConfig, GridStoreConfig, GridStoreProvider,
+    NoiseLayer, NoiseMode, NoiseParams, PlanetConfig, PlanetProvider, ProviderError,
+    ProviderWithEdits, VoxelData, VoxelProvider, VoxelValue,
 };

@@ -4,7 +4,7 @@
 //! tests for AABBs and spheres. Used for culling chunks and models that are
 //! outside the camera's field of view.
 
-use glam::{Vec3, Vec4, Mat4};
+use glam::{Mat4, Vec3, Vec4};
 
 /// A plane in 3D space defined by normal and distance from origin
 #[derive(Debug, Clone, Copy)]
@@ -20,7 +20,7 @@ impl Plane {
     pub fn from_vec4(v: Vec4) -> Self {
         let normal = Vec3::new(v.x, v.y, v.z);
         let length = normal.length();
-        
+
         if length > 0.0 {
             Self {
                 normal: normal / length,
@@ -33,13 +33,13 @@ impl Plane {
             }
         }
     }
-    
+
     /// Calculate signed distance from point to plane
     /// Positive = in front of plane, Negative = behind plane
     pub fn distance_to_point(&self, point: Vec3) -> f32 {
         self.normal.dot(point) + self.distance
     }
-    
+
     /// Test if point is in front of (or on) the plane
     pub fn is_in_front(&self, point: Vec3) -> bool {
         self.distance_to_point(point) >= 0.0
@@ -59,56 +59,56 @@ impl Frustum {
     /// Uses the Gribb-Hartmann method for plane extraction
     pub fn from_matrix(view_proj: Mat4) -> Self {
         let m = view_proj.to_cols_array();
-        
+
         // Extract planes using Gribb-Hartmann method
         // Each plane is extracted by adding/subtracting rows of the matrix
-        let left   = Plane::from_vec4(Vec4::new(
+        let left = Plane::from_vec4(Vec4::new(
             m[3] + m[0],
             m[7] + m[4],
             m[11] + m[8],
-            m[15] + m[12]
+            m[15] + m[12],
         ));
-        
-        let right  = Plane::from_vec4(Vec4::new(
+
+        let right = Plane::from_vec4(Vec4::new(
             m[3] - m[0],
             m[7] - m[4],
             m[11] - m[8],
-            m[15] - m[12]
+            m[15] - m[12],
         ));
-        
+
         let bottom = Plane::from_vec4(Vec4::new(
             m[3] + m[1],
             m[7] + m[5],
             m[11] + m[9],
-            m[15] + m[13]
+            m[15] + m[13],
         ));
-        
-        let top    = Plane::from_vec4(Vec4::new(
+
+        let top = Plane::from_vec4(Vec4::new(
             m[3] - m[1],
             m[7] - m[5],
             m[11] - m[9],
-            m[15] - m[13]
+            m[15] - m[13],
         ));
-        
-        let near   = Plane::from_vec4(Vec4::new(
+
+        let near = Plane::from_vec4(Vec4::new(
             m[3] + m[2],
             m[7] + m[6],
             m[11] + m[10],
-            m[15] + m[14]
+            m[15] + m[14],
         ));
-        
-        let far    = Plane::from_vec4(Vec4::new(
+
+        let far = Plane::from_vec4(Vec4::new(
             m[3] - m[2],
             m[7] - m[6],
             m[11] - m[10],
-            m[15] - m[14]
+            m[15] - m[14],
         ));
-        
+
         Self {
             planes: [left, right, bottom, top, near, far],
         }
     }
-    
+
     /// Test if an axis-aligned bounding box (AABB) intersects the frustum
     /// Returns true if the AABB is fully or partially inside the frustum
     pub fn intersects_aabb(&self, min: Vec3, max: Vec3) -> bool {
@@ -119,17 +119,17 @@ impl Frustum {
                 if plane.normal.y >= 0.0 { max.y } else { min.y },
                 if plane.normal.z >= 0.0 { max.z } else { min.z },
             );
-            
+
             // If the positive vertex is behind the plane, the entire AABB is outside
             if plane.distance_to_point(positive_vertex) < 0.0 {
                 return false; // Outside this plane
             }
         }
-        
+
         // AABB intersects or is inside all planes
         true
     }
-    
+
     /// Test if a sphere intersects the frustum (faster than AABB for simple objects)
     /// Returns true if the sphere is fully or partially inside the frustum
     pub fn intersects_sphere(&self, center: Vec3, radius: f32) -> bool {
@@ -138,10 +138,10 @@ impl Frustum {
                 return false; // Sphere is entirely behind this plane
             }
         }
-        
+
         true
     }
-    
+
     /// Test if a point is inside the frustum
     pub fn contains_point(&self, point: Vec3) -> bool {
         for plane in &self.planes {
@@ -165,7 +165,7 @@ impl AABB {
     pub fn new(min: Vec3, max: Vec3) -> Self {
         Self { min, max }
     }
-    
+
     /// Create an AABB from center and half-extents
     pub fn from_center_extents(center: Vec3, half_extents: Vec3) -> Self {
         Self {
@@ -173,17 +173,17 @@ impl AABB {
             max: center + half_extents,
         }
     }
-    
+
     /// Get the center of the AABB
     pub fn center(&self) -> Vec3 {
         (self.min + self.max) * 0.5
     }
-    
+
     /// Get the half-extents (half the size along each axis)
     pub fn half_extents(&self) -> Vec3 {
         (self.max - self.min) * 0.5
     }
-    
+
     /// Get all 8 corners of the AABB
     pub fn corners(&self) -> [Vec3; 8] {
         [
@@ -197,22 +197,25 @@ impl AABB {
             Vec3::new(self.max.x, self.max.y, self.max.z),
         ]
     }
-    
+
     /// Transform AABB by a matrix (returns axis-aligned bounds of transformed box)
     pub fn transform(&self, matrix: Mat4) -> Self {
         let corners = self.corners();
-        let transformed: Vec<_> = corners.iter()
+        let transformed: Vec<_> = corners
+            .iter()
             .map(|&corner| matrix.transform_point3(corner))
             .collect();
-        
-        let min = transformed.iter()
+
+        let min = transformed
+            .iter()
             .fold(Vec3::splat(f32::MAX), |acc: Vec3, &v: &Vec3| acc.min(v));
-        let max = transformed.iter()
+        let max = transformed
+            .iter()
             .fold(Vec3::splat(f32::MIN), |acc: Vec3, &v: &Vec3| acc.max(v));
-        
+
         Self { min, max }
     }
-    
+
     /// Test if this AABB intersects the frustum
     pub fn intersects_frustum(&self, frustum: &Frustum) -> bool {
         frustum.intersects_aabb(self.min, self.max)
@@ -222,19 +225,19 @@ impl AABB {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_plane_distance() {
         let plane = Plane {
             normal: Vec3::Y,
             distance: -5.0,
         };
-        
+
         assert_eq!(plane.distance_to_point(Vec3::new(0.0, 5.0, 0.0)), 0.0);
         assert_eq!(plane.distance_to_point(Vec3::new(0.0, 10.0, 0.0)), 5.0);
         assert_eq!(plane.distance_to_point(Vec3::new(0.0, 0.0, 0.0)), -5.0);
     }
-    
+
     #[test]
     fn test_aabb_corners() {
         let aabb = AABB::new(Vec3::ZERO, Vec3::ONE);
@@ -243,7 +246,7 @@ mod tests {
         assert!(corners.contains(&Vec3::ZERO));
         assert!(corners.contains(&Vec3::ONE));
     }
-    
+
     #[test]
     fn test_aabb_center() {
         let aabb = AABB::new(Vec3::ZERO, Vec3::splat(2.0));

@@ -1,5 +1,5 @@
-use egui::{RichText, TopBottomPanel};
 use crate::winit::window::Window;
+use egui::{RichText, TopBottomPanel};
 
 use crate::framegraph::Node;
 use crate::gfx::{Gfx, ScreenDescriptor};
@@ -26,37 +26,49 @@ impl<'w> Gfx<'w> {
                     ui.label(format!("{}×{}", self.config.width, self.config.height));
                     ui.separator();
                     let vsync_on = self.config.present_mode == crate::wgpu::PresentMode::Fifo;
-                    ui.label(if vsync_on { "VSync: On (Fifo)" } else { "VSync: Off (Mailbox)" });
+                    ui.label(if vsync_on {
+                        "VSync: On (Fifo)"
+                    } else {
+                        "VSync: Off (Mailbox)"
+                    });
                     if let Some(fps) = self.hud_fps {
                         ui.separator();
                         ui.label(format!("FPS: {:.1}", fps));
                     }
-                    
+
                     // NEW: Render statistics
                     let stats = &self.chunk_renderer.stats;
                     if stats.total_chunks > 0 {
                         ui.separator();
-                        ui.label(format!("Pos: ({:.1}, {:.1}, {:.1})", self.cam_eye.x, self.cam_eye.y, self.cam_eye.z));
+                        ui.label(format!(
+                            "Pos: ({:.1}, {:.1}, {:.1})",
+                            self.cam_eye.x, self.cam_eye.y, self.cam_eye.z
+                        ));
                         ui.separator();
                         ui.label(format!("View: {:.0}m", self.fov_distance));
                         ui.separator();
-                        ui.label(format!("Chunks: {}/{}", stats.visible_chunks, stats.total_chunks));
+                        ui.label(format!(
+                            "Chunks: {}/{}",
+                            stats.visible_chunks, stats.total_chunks
+                        ));
                         ui.separator();
                         ui.label(format!("Triangles: {}K", stats.rendered_triangles / 1000));
                         ui.separator();
                         ui.label(format!("Drawcalls: {}", stats.draw_calls));
                         ui.separator();
                         ui.label(format!("Culled: {}", stats.culled_chunks));
-                        
+
                         // Chunk generation performance
-                        if let (Some(gen_ms), Some(mesh_ms)) = (self.chunk_gen_time_ms, self.chunk_mesh_time_ms) {
+                        if let (Some(gen_ms), Some(mesh_ms)) =
+                            (self.chunk_gen_time_ms, self.chunk_mesh_time_ms)
+                        {
                             ui.separator();
                             ui.label(format!("Gen: {:.2}ms", gen_ms));
                             ui.separator();
                             ui.label(format!("Mesh: {:.2}ms", mesh_ms));
                         }
                     }
-                    
+
                     if let Some(name) = &self.last_img {
                         ui.separator();
                         ui.label(format!("Texture: {}", name));
@@ -73,14 +85,19 @@ impl<'w> Gfx<'w> {
                 });
             });
         });
-        self.egui_state.handle_platform_output(window, full_output.platform_output);
+        self.egui_state
+            .handle_platform_output(window, full_output.platform_output);
 
         // main color
         let frame = self.surface.get_current_texture()?;
-        let view = frame.texture.create_view(&crate::wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&crate::wgpu::CommandEncoderDescriptor { label: Some("encoder") });
+        let view = frame
+            .texture
+            .create_view(&crate::wgpu::TextureViewDescriptor::default());
+        let mut encoder =
+            self.device
+                .create_command_encoder(&crate::wgpu::CommandEncoderDescriptor {
+                    label: Some("encoder"),
+                });
 
         // framegraph
         for node in &fg.nodes {
@@ -96,14 +113,16 @@ impl<'w> Gfx<'w> {
                                 store: crate::wgpu::StoreOp::Store,
                             },
                         })],
-                        depth_stencil_attachment: Some(crate::wgpu::RenderPassDepthStencilAttachment {
-                            view: &self.depth_view,
-                            depth_ops: Some(crate::wgpu::Operations {
-                                load: crate::wgpu::LoadOp::Clear(1.0),
-                                store: crate::wgpu::StoreOp::Store,
-                            }),
-                            stencil_ops: None,
-                        }),
+                        depth_stencil_attachment: Some(
+                            crate::wgpu::RenderPassDepthStencilAttachment {
+                                view: &self.depth_view,
+                                depth_ops: Some(crate::wgpu::Operations {
+                                    load: crate::wgpu::LoadOp::Clear(1.0),
+                                    store: crate::wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            },
+                        ),
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
@@ -119,44 +138,61 @@ impl<'w> Gfx<'w> {
                                 store: crate::wgpu::StoreOp::Store,
                             },
                         })],
-                        depth_stencil_attachment: Some(crate::wgpu::RenderPassDepthStencilAttachment {
-                            view: &self.depth_view,
-                            depth_ops: Some(crate::wgpu::Operations {
-                                load: crate::wgpu::LoadOp::Load,
-                                store: crate::wgpu::StoreOp::Store,
-                            }),
-                            stencil_ops: None,
-                        }),
+                        depth_stencil_attachment: Some(
+                            crate::wgpu::RenderPassDepthStencilAttachment {
+                                view: &self.depth_view,
+                                depth_ops: Some(crate::wgpu::Operations {
+                                    load: crate::wgpu::LoadOp::Load,
+                                    store: crate::wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            },
+                        ),
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
-                    rp.set_pipeline(&self.pipeline);
+                    // Choose pipeline based on wireframe mode
+                    if self.wireframe_state.enabled {
+                        rp.set_pipeline(&self.wireframe_pipeline);
+                    } else {
+                        rp.set_pipeline(&self.pipeline);
+                    }
                     rp.set_bind_group(0, &self.cam_bg, &[]);
                     rp.set_bind_group(1, &self.tex_bg, &[]);
                     rp.set_bind_group(2, &self.obj_bg, &[]);
-                    
+                    rp.set_bind_group(3, &self.wireframe_bg, &[]);
+
                     // NEW: Render chunks with frustum culling
                     let vp_matrix = self.get_vp_matrix();
                     let visible_chunks = self.chunk_renderer.cull_chunks(vp_matrix);
-                    
+
                     // Draw each visible chunk
                     for chunk_pos in &visible_chunks {
                         if let Some(mesh) = self.chunk_renderer.get_mesh(*chunk_pos) {
                             rp.set_vertex_buffer(0, mesh.vbuf.slice(..));
-                            rp.set_index_buffer(mesh.ibuf.slice(..), crate::wgpu::IndexFormat::Uint32);
+                            rp.set_index_buffer(
+                                mesh.ibuf.slice(..),
+                                crate::wgpu::IndexFormat::Uint32,
+                            );
                             rp.draw_indexed(0..mesh.index_count, 0, 0..1);
                         }
                     }
-                    
+
                     // Fallback: if no chunks, draw default quad
                     if self.chunk_renderer.meshes.is_empty() {
                         if let Some(mesh) = voxel_mesh {
                             rp.set_vertex_buffer(0, mesh.vbuf.slice(..));
-                            rp.set_index_buffer(mesh.ibuf.slice(..), crate::wgpu::IndexFormat::Uint32);
+                            rp.set_index_buffer(
+                                mesh.ibuf.slice(..),
+                                crate::wgpu::IndexFormat::Uint32,
+                            );
                             rp.draw_indexed(0..mesh.index_count, 0, 0..1);
                         } else {
                             rp.set_vertex_buffer(0, self.vbuf.slice(..));
-                            rp.set_index_buffer(self.ibuf.slice(..), crate::wgpu::IndexFormat::Uint16);
+                            rp.set_index_buffer(
+                                self.ibuf.slice(..),
+                                crate::wgpu::IndexFormat::Uint16,
+                            );
                             rp.draw_indexed(0..self.index_count, 0, 0..1);
                         }
                     }
@@ -169,7 +205,9 @@ impl<'w> Gfx<'w> {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.egui_ctx.pixels_per_point(),
         };
-        let clipped = self.egui_ctx.tessellate(full_output.shapes, screen.pixels_per_point);
+        let clipped = self
+            .egui_ctx
+            .tessellate(full_output.shapes, screen.pixels_per_point);
 
         for (id, delta) in &full_output.textures_delta.set {
             self.egui_painter

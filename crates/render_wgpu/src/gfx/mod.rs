@@ -1,17 +1,14 @@
 #![allow(dead_code)]
 
-use std::{
-    path::PathBuf,
-    time::SystemTime,
-};
+use std::{path::PathBuf, time::SystemTime};
 
+use crate::winit::{dpi::PhysicalSize, window::Window};
 use bytemuck::{Pod, Zeroable};
 use egui::{Context as EguiCtx, ViewportId};
-use egui_wgpu::{Renderer as EguiRenderer};
+use egui_wgpu::Renderer as EguiRenderer;
 use egui_winit::State as EguiWinit;
 use glam::{Mat4, Vec3};
 use math_util::Frustum;
-use crate::winit::{dpi::PhysicalSize, window::Window};
 
 use crate::pipeline::create_pipeline_with_shader;
 use crate::texture::{create_depth_view, make_checker_texture};
@@ -46,7 +43,7 @@ pub struct Gfx<'w> {
     pub cam_target: Vec3,
     pub cam_yaw: f32,
     pub cam_pitch: f32,
-    
+
     // Frustum for culling
     pub frustum: Frustum,
 
@@ -67,7 +64,7 @@ pub struct Gfx<'w> {
     pub(crate) hot: Option<HotReload>,
     pub(crate) last_img: Option<String>,
     pub(crate) hud_fps: Option<f32>,
-    
+
     // Chunk generation stats
     pub(crate) chunk_gen_time_ms: Option<f32>,
     pub(crate) chunk_mesh_time_ms: Option<f32>,
@@ -75,7 +72,14 @@ pub struct Gfx<'w> {
     // object state
     pub(crate) model: Mat4,
     pub(crate) tint: [f32; 4],
-    
+
+    // wireframe state
+    pub wireframe_state: WireframeState,
+    pub(crate) wireframe_buf: crate::wgpu::Buffer,
+    pub(crate) wireframe_bg: crate::wgpu::BindGroup,
+    pub(crate) wireframe_layout: crate::wgpu::BindGroupLayout,
+    pub(crate) wireframe_pipeline: crate::wgpu::RenderPipeline,
+
     // chunk rendering
     pub chunk_renderer: crate::chunk_renderer::ChunkRenderer,
 }
@@ -98,6 +102,28 @@ pub(crate) struct CameraUBO {
 pub(crate) struct ObjectUBO {
     pub model: [[f32; 4]; 4],
     pub tint: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+pub(crate) struct WireframeUBO {
+    pub enabled: f32,
+    pub color: [f32; 3],
+}
+
+#[derive(Debug, Clone)]
+pub struct WireframeState {
+    pub enabled: bool,
+    pub color: [f32; 3],
+}
+
+impl Default for WireframeState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            color: [0.0, 1.0, 0.0], // Green wireframe
+        }
+    }
 }
 
 #[repr(C)]
@@ -150,26 +176,28 @@ impl<'w> Gfx<'w> {
     pub fn new(window: &'w Window) -> Self {
         Self::new_with_config(window, None, None, None)
     }
-    
+
     pub fn new_with_config(
-        window: &'w Window, 
+        window: &'w Window,
         render_distance: Option<f32>,
         fov_degrees: Option<f32>,
         vsync: Option<bool>,
     ) -> Self {
-        use crate::wgpu::{Instance, PresentMode};
         use crate::wgpu::util::DeviceExt;
+        use crate::wgpu::{Instance, PresentMode};
 
         let size = window.inner_size();
 
         let instance = Instance::default();
         let surface = instance.create_surface(window).expect("surface");
 
-        let adapter = pollster::block_on(instance.request_adapter(&crate::wgpu::RequestAdapterOptions {
-            power_preference: crate::wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
+        let adapter = pollster::block_on(instance.request_adapter(
+            &crate::wgpu::RequestAdapterOptions {
+                power_preference: crate::wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            },
+        ))
         .expect("adapter");
 
         let info = adapter.get_info();
@@ -178,7 +206,7 @@ impl<'w> Gfx<'w> {
         let (device, queue) = pollster::block_on(adapter.request_device(
             &crate::wgpu::DeviceDescriptor {
                 label: Some("device"),
-                required_features: crate::wgpu::Features::empty(),
+                required_features: crate::wgpu::Features::POLYGON_MODE_LINE,
                 required_limits: crate::wgpu::Limits::default(),
                 memory_hints: crate::wgpu::MemoryHints::default(),
             },
@@ -193,7 +221,7 @@ impl<'w> Gfx<'w> {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
-        
+
         // Apply VSync setting from config (default to Mailbox for lower latency)
         let want_vsync = vsync.unwrap_or(false);
         let present = if want_vsync {
@@ -251,7 +279,9 @@ impl<'w> Gfx<'w> {
                 crate::wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: crate::wgpu::ShaderStages::FRAGMENT,
-                    ty: crate::wgpu::BindingType::Sampler(crate::wgpu::SamplerBindingType::Filtering),
+                    ty: crate::wgpu::BindingType::Sampler(
+                        crate::wgpu::SamplerBindingType::Filtering,
+                    ),
                     count: None,
                 },
             ],
@@ -273,12 +303,30 @@ impl<'w> Gfx<'w> {
             }],
         });
 
+        let wireframe_layout =
+            device.create_bind_group_layout(&crate::wgpu::BindGroupLayoutDescriptor {
+                label: Some("wireframe_bgl"),
+                entries: &[crate::wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: crate::wgpu::ShaderStages::FRAGMENT,
+                    ty: crate::wgpu::BindingType::Buffer {
+                        ty: crate::wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: core::num::NonZeroU64::new(core::mem::size_of::<
+                            WireframeUBO,
+                        >()
+                            as u64),
+                    },
+                    count: None,
+                }],
+            });
+
         // Camera + object buffers
-        let cam_eye = Vec3::new(32.0, 20.0, 32.0);  // Higher and further to see 2x2 chunk grid
-        // cam_target will be calculated from yaw/pitch
-        let cam_yaw = -std::f32::consts::PI * 0.75f32;  // Regarde vers le centre
-        let cam_pitch = -0.6f32;  // Regarde vers le bas
-        
+        let cam_eye = Vec3::new(32.0, 20.0, 32.0); // Higher and further to see 2x2 chunk grid
+                                                   // cam_target will be calculated from yaw/pitch
+        let cam_yaw = -std::f32::consts::PI * 0.75f32; // Regarde vers le centre
+        let cam_pitch = -0.6f32; // Regarde vers le bas
+
         // Calculate initial target from angles
         let forward = Vec3::new(
             cam_yaw.cos() * cam_pitch.cos(),
@@ -318,6 +366,23 @@ impl<'w> Gfx<'w> {
             }],
         });
 
+        // Wireframe
+        let wireframe_state = WireframeState::default();
+        let wireframe_buf = device.create_buffer(&crate::wgpu::BufferDescriptor {
+            label: Some("wireframe_buf"),
+            size: core::mem::size_of::<WireframeUBO>() as u64,
+            usage: crate::wgpu::BufferUsages::UNIFORM | crate::wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let wireframe_bg = device.create_bind_group(&crate::wgpu::BindGroupDescriptor {
+            label: Some("wireframe_bg"),
+            layout: &wireframe_layout,
+            entries: &[crate::wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wireframe_buf.as_entire_binding(),
+            }],
+        });
+
         // Texture
         let (tex_view, tex_sampler) = make_checker_texture(&device, &queue, 128, 128);
         let tex_bg = device.create_bind_group(&crate::wgpu::BindGroupDescriptor {
@@ -342,17 +407,37 @@ impl<'w> Gfx<'w> {
         });
         let pipeline = create_pipeline_with_shader(
             &device,
-            &[&cam_layout, &tex_layout, &obj_layout],
+            &[&cam_layout, &tex_layout, &obj_layout, &wireframe_layout],
+            &shader,
+            surface_format,
+        );
+
+        // Create wireframe pipeline with line topology
+        let wireframe_pipeline = crate::pipeline::create_wireframe_pipeline(
+            &device,
+            &[&cam_layout, &tex_layout, &obj_layout, &wireframe_layout],
             &shader,
             surface_format,
         );
 
         // Geometry
         let verts = [
-            VertexTex { pos: [-0.8, -0.6, 0.0], uv: [0.0, 1.0] },
-            VertexTex { pos: [ 0.8, -0.6, 0.0], uv: [1.0, 1.0] },
-            VertexTex { pos: [ 0.8,  0.6, 0.0], uv: [1.0, 0.0] },
-            VertexTex { pos: [-0.8,  0.6, 0.0], uv: [0.0, 0.0] },
+            VertexTex {
+                pos: [-0.8, -0.6, 0.0],
+                uv: [0.0, 1.0],
+            },
+            VertexTex {
+                pos: [0.8, -0.6, 0.0],
+                uv: [1.0, 1.0],
+            },
+            VertexTex {
+                pos: [0.8, 0.6, 0.0],
+                uv: [1.0, 0.0],
+            },
+            VertexTex {
+                pos: [-0.8, 0.6, 0.0],
+                uv: [0.0, 0.0],
+            },
         ];
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
@@ -369,17 +454,18 @@ impl<'w> Gfx<'w> {
 
         // egui
         let egui_ctx = EguiCtx::default();
-        let egui_state = EguiWinit::new(egui_ctx.clone(), ViewportId::ROOT, window, None, None, None);
+        let egui_state =
+            EguiWinit::new(egui_ctx.clone(), ViewportId::ROOT, window, None, None, None);
         let egui_painter = EguiRenderer::new(&device, surface_format, None, 1, false);
 
         // Apply FOV from config (default 90 degrees)
         let fov_degrees = fov_degrees.unwrap_or(90.0);
         let fov_radians = fov_degrees.to_radians();
-        
+
         // Far plane should be larger than render distance to avoid clipping
         // Use 2x render distance to ensure all visible chunks are rendered
         let fov_distance = render_distance.unwrap_or(1000.0) * 2.0;
-        
+
         // Initialize frustum (will be updated in write_camera)
         let initial_frustum = Frustum::from_matrix(Mat4::IDENTITY);
 
@@ -423,10 +509,16 @@ impl<'w> Gfx<'w> {
             chunk_mesh_time_ms: None,
             model,
             tint,
+            wireframe_state,
+            wireframe_buf,
+            wireframe_bg,
+            wireframe_layout,
+            wireframe_pipeline,
             chunk_renderer: crate::chunk_renderer::ChunkRenderer::new(32.0),
         };
         gfx.write_camera();
         gfx.write_object();
+        gfx.write_wireframe();
         gfx
     }
 }
