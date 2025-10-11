@@ -45,6 +45,14 @@ impl<'w> Gfx<'w> {
                         ui.label(format!("Drawcalls: {}", stats.draw_calls));
                         ui.separator();
                         ui.label(format!("Culled: {}", stats.culled_chunks));
+                        
+                        // Chunk generation performance
+                        if let (Some(gen_ms), Some(mesh_ms)) = (self.chunk_gen_time_ms, self.chunk_mesh_time_ms) {
+                            ui.separator();
+                            ui.label(format!("Gen: {:.2}ms", gen_ms));
+                            ui.separator();
+                            ui.label(format!("Mesh: {:.2}ms", mesh_ms));
+                        }
                     }
                     
                     if let Some(name) = &self.last_img {

@@ -31,4 +31,9 @@ impl<'w> Gfx<'w> {
     pub fn get_fov_distance(&self) -> f32 {
         self.fov_distance
     }
+    
+    pub fn set_chunk_perf_stats(&mut self, gen_time_ms: f32, mesh_time_ms: f32) {
+        self.chunk_gen_time_ms = Some(gen_time_ms);
+        self.chunk_mesh_time_ms = Some(mesh_time_ms);
+    }
 }

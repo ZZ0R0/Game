@@ -6,9 +6,38 @@
 
 use glam::IVec3;
 use std::sync::{Arc, Mutex};
-use std::collections::VecDeque;
+use std::collections::BinaryHeap;
+use std::cmp::Ordering;
 use crate::chunk::Chunk;
 use crate::meshing::MeshData;
+
+/// Prioritized job wrapper for distance-based processing
+#[derive(Clone)]
+struct PrioritizedJob {
+    job: ChunkJob,
+    priority: i32, // Lower = higher priority (closer to player)
+}
+
+impl PartialEq for PrioritizedJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority == other.priority
+    }
+}
+
+impl Eq for PrioritizedJob {}
+
+impl PartialOrd for PrioritizedJob {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PrioritizedJob {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse ordering: lower priority value = higher priority in queue
+        other.priority.cmp(&self.priority)
+    }
+}
 
 /// Job types in the pipeline
 #[derive(Debug, Clone)]
@@ -42,10 +71,10 @@ pub enum JobResult {
     PhysicsReady { position: IVec3 },
 }
 
-/// Thread-safe job queue
+/// Thread-safe job queue with priority-based processing
 pub struct JobQueue {
-    /// Pending jobs (FIFO)
-    pending: Arc<Mutex<VecDeque<ChunkJob>>>,
+    /// Pending jobs (priority queue, lower distance = higher priority)
+    pending: Arc<Mutex<BinaryHeap<PrioritizedJob>>>,
     
     /// Completed jobs waiting to be consumed
     completed: Arc<Mutex<Vec<JobResult>>>,
@@ -61,30 +90,95 @@ pub struct JobStats {
     pub total_uploaded: u64,
     pub pending_count: usize,
     pub completed_count: usize,
+    
+    // Timing stats (in milliseconds)
+    pub avg_generation_time_ms: f32,
+    pub avg_meshing_time_ms: f32,
+    pub total_generation_time_ms: f32,
+    pub total_meshing_time_ms: f32,
 }
 
 impl JobQueue {
     pub fn new() -> Self {
         Self {
-            pending: Arc::new(Mutex::new(VecDeque::new())),
+            pending: Arc::new(Mutex::new(BinaryHeap::new())),
             completed: Arc::new(Mutex::new(Vec::new())),
             stats: Arc::new(Mutex::new(JobStats::default())),
         }
     }
     
-    /// Add a job to the queue
-    pub fn push(&self, job: ChunkJob) {
+    /// Add a job to the queue with priority based on distance from player
+    /// player_pos is in world coordinates (blocks)
+    pub fn push_with_priority(&self, job: ChunkJob, player_pos: glam::Vec3) {
+        // Get chunk position from job
+        let chunk_pos = match &job {
+            ChunkJob::Generate { position } => *position,
+            ChunkJob::Mesh { position, .. } => *position,
+            ChunkJob::Upload { position, .. } => *position,
+            ChunkJob::Physics { position } => *position,
+        };
+        
+        // Convert player world position to chunk coordinates
+        let player_chunk = crate::chunk::ChunkManager::world_to_chunk(IVec3::new(
+            player_pos.x as i32,
+            player_pos.y as i32,
+            player_pos.z as i32,
+        ));
+        
+        // Calculate Manhattan distance (cheaper than Euclidean, good for priority)
+        let dist = (chunk_pos - player_chunk).abs();
+        let priority = dist.x + dist.y + dist.z;
+        
         let mut pending = self.pending.lock().unwrap();
-        pending.push_back(job);
+        pending.push(PrioritizedJob { job, priority });
         
         let mut stats = self.stats.lock().unwrap();
         stats.pending_count = pending.len();
     }
     
-    /// Add multiple jobs at once
+    /// Add a job to the queue (legacy method, uses default priority)
+    pub fn push(&self, job: ChunkJob) {
+        // Use a default priority (middle of the range)
+        let mut pending = self.pending.lock().unwrap();
+        pending.push(PrioritizedJob { job, priority: 1000 });
+        
+        let mut stats = self.stats.lock().unwrap();
+        stats.pending_count = pending.len();
+    }
+    
+    /// Add multiple jobs at once with priority
+    pub fn push_batch_with_priority(&self, jobs: Vec<ChunkJob>, player_pos: glam::Vec3) {
+        let player_chunk = crate::chunk::ChunkManager::world_to_chunk(IVec3::new(
+            player_pos.x as i32,
+            player_pos.y as i32,
+            player_pos.z as i32,
+        ));
+        
+        let mut pending = self.pending.lock().unwrap();
+        for job in jobs {
+            let chunk_pos = match &job {
+                ChunkJob::Generate { position } => *position,
+                ChunkJob::Mesh { position, .. } => *position,
+                ChunkJob::Upload { position, .. } => *position,
+                ChunkJob::Physics { position } => *position,
+            };
+            
+            let dist = (chunk_pos - player_chunk).abs();
+            let priority = dist.x + dist.y + dist.z;
+            
+            pending.push(PrioritizedJob { job, priority });
+        }
+        
+        let mut stats = self.stats.lock().unwrap();
+        stats.pending_count = pending.len();
+    }
+    
+    /// Add multiple jobs at once (legacy method)
     pub fn push_batch(&self, jobs: Vec<ChunkJob>) {
         let mut pending = self.pending.lock().unwrap();
-        pending.extend(jobs);
+        for job in jobs {
+            pending.push(PrioritizedJob { job, priority: 1000 });
+        }
         
         let mut stats = self.stats.lock().unwrap();
         stats.pending_count = pending.len();
@@ -96,10 +190,10 @@ impl JobQueue {
         let mut processed = 0;
         
         for _ in 0..max_jobs {
-            // Pop a job from the queue
+            // Pop highest priority job from the queue
             let job = {
                 let mut pending = self.pending.lock().unwrap();
-                pending.pop_front()
+                pending.pop().map(|pj| pj.job)
             };
             
             let Some(job) = job else {
@@ -112,15 +206,20 @@ impl JobQueue {
                     // Generate terrain with panic protection
                     use std::panic::catch_unwind;
                     use std::panic::AssertUnwindSafe;
+                    use std::time::Instant;
                     
+                    let start = Instant::now();
                     let result = catch_unwind(AssertUnwindSafe(|| {
                         self.generate_chunk(position)
                     }));
+                    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
                     
                     match result {
                         Ok(chunk) => {
                             let mut stats = self.stats.lock().unwrap();
                             stats.total_generated += 1;
+                            stats.total_generation_time_ms += elapsed_ms;
+                            stats.avg_generation_time_ms = stats.total_generation_time_ms / stats.total_generated as f32;
                             Some(JobResult::Generated { position, chunk })
                         }
                         Err(e) => {
@@ -134,18 +233,23 @@ impl JobQueue {
                     // Generate mesh from chunk with panic protection
                     use std::panic::catch_unwind;
                     use std::panic::AssertUnwindSafe;
+                    use std::time::Instant;
                     
+                    let start = Instant::now();
                     let result = catch_unwind(AssertUnwindSafe(|| {
                         // Use greedy mesher without neighbors for async meshing
                         // We pass None for chunk_manager since we don't have access to it here
                         let atlas = crate::atlas::TextureAtlas::new_16x16();
                         crate::meshing::greedy_mesh_chunk(&chunk, None, &atlas)
                     }));
+                    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
                     
                     match result {
                         Ok(mesh) => {
                             let mut stats = self.stats.lock().unwrap();
                             stats.total_meshed += 1;
+                            stats.total_meshing_time_ms += elapsed_ms;
+                            stats.avg_meshing_time_ms = stats.total_meshing_time_ms / stats.total_meshed as f32;
                             Some(JobResult::Meshed { position, mesh })
                         }
                         Err(e) => {

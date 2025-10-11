@@ -79,7 +79,7 @@ impl<'w> Gfx<'w> {
     pub fn get_vp_matrix(&self) -> glam::Mat4 {
         let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
         let view = glam::Mat4::look_at_rh(self.cam_eye, self.cam_target, Vec3::Y);
-        let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.01, self.fov_distance);
+        let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.1, self.fov_distance);
         proj * view
     }
 
@@ -87,7 +87,7 @@ impl<'w> Gfx<'w> {
         let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
         let view = glam::Mat4::look_at_rh(self.cam_eye, self.cam_target, Vec3::Y);
         
-        let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.01, self.fov_distance);
+        let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.1, self.fov_distance);
         let vp = proj * view;
         let ubo = CameraUBO { vp: vp.to_cols_array_2d() };
         self.queue.write_buffer(&self.cam_buf, 0, bytemuck::bytes_of(&ubo));

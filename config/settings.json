@@ -1,0 +1,29 @@
+{
+  "graphics": {
+    "window_width": 1920,
+    "window_height": 1080,
+    "fullscreen": false,
+    "vsync": false,
+    "fov_degrees": 90.0,
+    "render_distance": 320.0
+  },
+  "world": {
+    "chunk_size": 32,
+    "worker_threads": 4
+  },
+  "camera": {
+    "move_speed": 10.0,
+    "sprint_multiplier": 3.0,
+    "mouse_sensitivity": 0.003,
+    "start_position": [
+      0.0,
+      100.0,
+      0.0
+    ]
+  },
+  "performance": {
+    "target_fps": 60,
+    "frustum_culling": true,
+    "greedy_meshing": true
+  }
+}

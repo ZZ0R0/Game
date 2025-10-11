@@ -63,6 +63,10 @@ pub struct Gfx<'w> {
     pub(crate) hot: Option<HotReload>,
     pub(crate) last_img: Option<String>,
     pub(crate) hud_fps: Option<f32>,
+    
+    // Chunk generation stats
+    pub(crate) chunk_gen_time_ms: Option<f32>,
+    pub(crate) chunk_mesh_time_ms: Option<f32>,
 
     // object state
     pub(crate) model: Mat4,
@@ -140,6 +144,15 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 
 impl<'w> Gfx<'w> {
     pub fn new(window: &'w Window) -> Self {
+        Self::new_with_config(window, None, None, None)
+    }
+    
+    pub fn new_with_config(
+        window: &'w Window, 
+        render_distance: Option<f32>,
+        fov_degrees: Option<f32>,
+        vsync: Option<bool>,
+    ) -> Self {
         use crate::wgpu::{Instance, PresentMode};
         use crate::wgpu::util::DeviceExt;
 
@@ -176,7 +189,12 @@ impl<'w> Gfx<'w> {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
-        let present = if caps.present_modes.contains(&PresentMode::Mailbox) {
+        
+        // Apply VSync setting from config (default to Mailbox for lower latency)
+        let want_vsync = vsync.unwrap_or(false);
+        let present = if want_vsync {
+            PresentMode::Fifo
+        } else if caps.present_modes.contains(&PresentMode::Mailbox) {
             PresentMode::Mailbox
         } else {
             PresentMode::Fifo
@@ -350,8 +368,13 @@ impl<'w> Gfx<'w> {
         let egui_state = EguiWinit::new(egui_ctx.clone(), ViewportId::ROOT, window, None, None, None);
         let egui_painter = EguiRenderer::new(&device, surface_format, None, 1, false);
 
-        let fov_radians = std::f32::consts::FRAC_PI_2; // 90 degrees
-        let fov_distance = 1000.0; // Far plane at 1000 blocks
+        // Apply FOV from config (default 90 degrees)
+        let fov_degrees = fov_degrees.unwrap_or(90.0);
+        let fov_radians = fov_degrees.to_radians();
+        
+        // Far plane should be larger than render distance to avoid clipping
+        // Use 2x render distance to ensure all visible chunks are rendered
+        let fov_distance = render_distance.unwrap_or(1000.0) * 2.0;
 
         let mut gfx = Self {
             surface,
@@ -388,6 +411,8 @@ impl<'w> Gfx<'w> {
             hot: None,
             last_img: None,
             hud_fps: None,
+            chunk_gen_time_ms: None,
+            chunk_mesh_time_ms: None,
             model,
             tint,
             chunk_renderer: crate::chunk_renderer::ChunkRenderer::new(32.0),

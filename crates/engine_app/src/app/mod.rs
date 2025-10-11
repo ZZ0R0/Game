@@ -22,6 +22,8 @@ use rwinit::{
     window::{Window, WindowId},
 };
 
+use crate::config::GameConfig;
+
 mod state;
 use state::Input;
 
@@ -39,6 +41,9 @@ pub struct App {
     dt: Duration,
     next_tick: Instant,
     input: Input,
+    
+    // Configuration
+    config: GameConfig,
 
     // FPS
     frames: u32,
@@ -71,23 +76,34 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        // Load configuration from file
+        let config = GameConfig::load().unwrap_or_else(|e| {
+            eprintln!("⚠️  Failed to load config: {}", e);
+            eprintln!("Using default configuration");
+            GameConfig::default()
+        });
+        
+        println!("📋 Configuration loaded:");
+        println!("   • Render distance: {:.0} blocks", config.graphics.render_distance);
+        println!("   • FOV: {:.0}°", config.graphics.fov_degrees);
+        println!("   • Worker threads: {}", config.world.worker_threads);
+        println!("   • Camera speed: {:.1} blocks/s", config.camera.move_speed);
+        
         // Create job queue and start workers
         let job_queue = Arc::new(JobQueue::new());
-        let worker = JobWorker::new(Arc::clone(&job_queue), 4); // 4 worker threads
+        let worker = JobWorker::new(Arc::clone(&job_queue), config.world.worker_threads);
         let worker_handle = worker.start();
         
-        // Configure chunk ring based on render distance
-        // fov_distance from renderer = 1000 blocks (far plane)
-        // Each chunk = 32 blocks, so view_radius = 1000 / 32 ≈ 31 chunks
-        const CHUNK_SIZE: f32 = 32.0;
-        const RENDER_DISTANCE: f32 = 100.0; // Must match fov_distance in gfx
-        let view_radius = (RENDER_DISTANCE / CHUNK_SIZE) as i32;
+        // Configure chunk ring based on render distance from config
+        let view_radius = config.calculate_view_radius();
         
         let ring_config = ChunkRingConfig {
-            view_radius,                    // Based on render distance
+            view_radius,                         // Based on render distance from config
             generation_radius: view_radius + 2,  // Generate 2 chunks ahead
             unload_radius: view_radius + 4,      // Unload 4 chunks beyond
         };
+        
+        println!("   • View radius: {} chunks ({} blocks)", view_radius, view_radius * config.world.chunk_size as i32);
         
         let start_time = Instant::now();
         
@@ -97,10 +113,11 @@ impl App {
             fg: FrameGraph::new()
                 .clear(wgpu::Color { r: 0.07, g: 0.07, b: 0.09, a: 1.0 })
                 .scene(),
-            engine: Engine::new_fixed_hz(60),
-            dt: Duration::from_secs_f64(1.0 / 60.0),
+            engine: Engine::new_fixed_hz(config.performance.target_fps),
+            dt: Duration::from_secs_f64(1.0 / config.performance.target_fps as f64),
             next_tick: Instant::now(),
             input: Input::default(),
+            config,
             frames: 0,
             last_fps_t: start_time,
             total_fps_samples: 0.0,
@@ -211,20 +228,23 @@ impl App {
                 }
             }
             
-            // Queue generation jobs for new chunks
+            // Queue generation jobs for new chunks with priority based on distance from player
             for chunk_pos in to_load {
-                // Create generation job
+                // Generate chunk SYNCHRONOUSLY (main thread) - now with parallel rayon
                 let chunk = self.terrain_generator.generate_chunk(chunk_pos);
                 
                 // Insert into chunk manager
                 self.chunk_manager.insert(chunk.clone());
                 self.chunk_ring.mark_loaded(chunk_pos);
                 
-                // Queue meshing job
-                self.job_queue.push(ChunkJob::Mesh {
-                    position: chunk_pos,
-                    chunk: Arc::new(chunk),
-                });
+                // Queue meshing job with priority based on distance from player
+                self.job_queue.push_with_priority(
+                    ChunkJob::Mesh {
+                        position: chunk_pos,
+                        chunk: Arc::new(chunk),
+                    },
+                    cam_pos // Pass player position for priority calculation
+                );
             }
         }
     }
@@ -397,23 +417,44 @@ impl ApplicationHandler for App {
 
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.window.is_none() {
-            let attrs = Window::default_attributes().with_title("Dev Engine - Voxel World (NEW)");
+            let mut attrs = Window::default_attributes().with_title("Dev Engine - Voxel World (NEW)");
+            
+            // Apply window configuration
+            attrs = attrs.with_inner_size(rwinit::dpi::LogicalSize::new(
+                self.config.graphics.window_width,
+                self.config.graphics.window_height,
+            ));
+            
+            if self.config.graphics.fullscreen {
+                attrs = attrs.with_fullscreen(Some(rwinit::window::Fullscreen::Borderless(None)));
+            }
+            
             let window = el.create_window(attrs).expect("create_window");
             let window_ref: &'static Window = Box::leak(Box::new(window));
             
             // Start in UI mode (cursor visible)
             // Player will click to enter Game mode
             
-            let mut gfx = Gfx::new(window_ref);
+            let mut gfx = Gfx::new_with_config(
+                window_ref, 
+                Some(self.config.graphics.render_distance),
+                Some(self.config.graphics.fov_degrees),
+                Some(self.config.graphics.vsync),
+            );
             let _ = gfx.enable_shader_hot_reload("crates/render_wgpu/assets/shader.wgsl");
+            
+            // Apply camera position from config
+            gfx.cam_eye = glam::Vec3::from(self.config.camera.start_position);
+            
             self.window = Some(window_ref);
             self.gfx = Some(gfx);
             
-            println!("=== NEW CHUNK SYSTEM INITIALIZED ===");
-            println!("✓ Worker threads: 4");
-            println!("✓ View radius: 8 chunks");
-            println!("✓ Generation radius: 10 chunks");
-            println!("✓ Chunk pool capacity: 512");
+            println!("=== GAME STARTED ===");
+            println!("Worker threads: {}", self.config.world.worker_threads);
+            println!("View radius: {} chunks", self.config.calculate_view_radius());
+            println!("Render distance: {:.0} blocks", self.config.graphics.render_distance);
+            println!("FOV: {:.0}°", self.config.graphics.fov_degrees);
+            println!("VSync: {}", if self.config.graphics.vsync { "On" } else { "Off" });
             
             // Initial chunk loading will happen in about_to_wait
         }
@@ -424,7 +465,7 @@ impl ApplicationHandler for App {
         if self.control_mode == ControlMode::Game {
             if let DeviceEvent::MouseMotion { delta } = event {
                 if let (Some(g), Some(w)) = (self.gfx.as_mut(), self.window) {
-                    let sensitivity = 0.003;
+                    let sensitivity = self.config.camera.mouse_sensitivity;
                     let dx = delta.0 as f32 * sensitivity;
                     let dy = -(delta.1 as f32) * sensitivity;
                     g.rotate_camera(dx, dy);
@@ -503,7 +544,16 @@ impl ApplicationHandler for App {
                 let dt = now.duration_since(self.last_fps_t);
                 if dt.as_secs_f32() >= 1.0 {
                     let fps = self.frames as f32 / dt.as_secs_f32();
-                    if let Some(g) = self.gfx.as_mut() { g.set_fps(fps); }
+                    if let Some(g) = self.gfx.as_mut() { 
+                        g.set_fps(fps); 
+                        
+                        // Update chunk generation performance stats
+                        let job_stats = self.job_queue.get_stats();
+                        g.set_chunk_perf_stats(
+                            job_stats.avg_generation_time_ms,
+                            job_stats.avg_meshing_time_ms
+                        );
+                    }
                     
                     // Track FPS for average calculation
                     self.total_fps_samples += fps;
@@ -536,12 +586,12 @@ impl ApplicationHandler for App {
             if let Some(g) = self.gfx.as_mut() {
                 // WASD camera movement in 3D
                 // Space to go up, C to go down
-                // Hold Shift for 10x speed boost
-                let mut speed = 3.0 * self.dt.as_secs_f32();
+                // Hold Shift for speed boost
+                let mut speed = self.config.camera.move_speed * self.dt.as_secs_f32();
                 
                 // Speed boost when holding Shift
                 if self.input.held(KeyCode::ShiftLeft) || self.input.held(KeyCode::ShiftRight) {
-                    speed *= 10.0;
+                    speed *= self.config.camera.sprint_multiplier;
                 }
                 
                 let forward = (self.input.held(KeyCode::KeyW) as i32 - self.input.held(KeyCode::KeyS) as i32) as f32;
@@ -558,10 +608,10 @@ impl ApplicationHandler for App {
                 g.set_model(model);
             }
             
-            // NEW: Update chunk loading based on camera position
+            // Update chunk loading based on camera position
             self.update_chunk_loading();
             
-            // NEW: Process completed jobs from workers
+            // Process completed jobs from workers
             self.process_completed_jobs();
             
             // Update dirty chunks (from block editing)

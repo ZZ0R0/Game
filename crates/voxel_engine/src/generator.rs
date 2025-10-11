@@ -3,6 +3,7 @@
 //! Uses noise functions to create varied terrain with hills, valleys, and features
 
 use glam::IVec3;
+use rayon::prelude::*;
 use crate::chunk::{Chunk, CHUNK_SIZE, BlockId, STONE, DIRT, GRASS, AIR, WATER};
 
 /// Terrain generator configuration
@@ -47,42 +48,51 @@ impl TerrainGenerator {
     }
     
     /// Generate a chunk at the given position
+    /// Uses rayon to parallelize across all voxel positions
     pub fn generate_chunk(&self, position: IVec3) -> Chunk {
         let mut chunk = Chunk::new(position);
         
-        // Generate terrain for this chunk
-        for local_z in 0..CHUNK_SIZE {
-            for local_x in 0..CHUNK_SIZE {
-                // Convert to world coordinates
-                let world_x = position.x * CHUNK_SIZE as i32 + local_x as i32;
-                let world_z = position.z * CHUNK_SIZE as i32 + local_z as i32;
-                
-                // Calculate height at this XZ position
-                let height = self.calculate_height(world_x, world_z);
-                
-                // Fill column from bottom to height
-                for local_y in 0..CHUNK_SIZE {
-                    let world_y = position.y * CHUNK_SIZE as i32 + local_y as i32;
-                    
-                    let block = if world_y < height {
-                        // Underground
-                        if world_y < height - 4 {
-                            STONE
-                        } else if world_y < height - 1 {
-                            DIRT
+        // Generate all voxel positions in parallel
+        // We'll collect (x, y, z, block) tuples and then apply them
+        let blocks: Vec<_> = (0..CHUNK_SIZE)
+            .into_par_iter()
+            .flat_map(|local_z| {
+                (0..CHUNK_SIZE).into_par_iter().flat_map(move |local_y| {
+                    (0..CHUNK_SIZE).into_par_iter().map(move |local_x| {
+                        // Convert to world coordinates
+                        let world_x = position.x * CHUNK_SIZE as i32 + local_x as i32;
+                        let world_y = position.y * CHUNK_SIZE as i32 + local_y as i32;
+                        let world_z = position.z * CHUNK_SIZE as i32 + local_z as i32;
+                        
+                        // Calculate height at this XZ position
+                        let height = self.calculate_height(world_x, world_z);
+                        
+                        // Determine block type
+                        let block = if world_y < height {
+                            // Underground
+                            if world_y < height - 4 {
+                                STONE
+                            } else if world_y < height - 1 {
+                                DIRT
+                            } else {
+                                GRASS
+                            }
+                        } else if world_y <= self.config.water_level {
+                            // Water
+                            WATER
                         } else {
-                            GRASS
-                        }
-                    } else if world_y <= self.config.water_level {
-                        // Water
-                        WATER
-                    } else {
-                        AIR
-                    };
-                    
-                    chunk.set(local_x, local_y, local_z, block);
-                }
-            }
+                            AIR
+                        };
+                        
+                        (local_x, local_y, local_z, block)
+                    })
+                })
+            })
+            .collect();
+        
+        // Apply results to chunk (sequential, but fast)
+        for (x, y, z, block) in blocks {
+            chunk.set(x, y, z, block);
         }
         
         chunk
