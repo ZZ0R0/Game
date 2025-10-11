@@ -9,9 +9,9 @@ use render_wgpu::gfx::Gfx;
 use render_wgpu::winit as rwinit;
 
 use voxel_engine::{
-    ChunkManager, greedy_mesh_chunk, TextureAtlas, STONE, AIR,
+    ChunkManager, TextureAtlas, STONE, AIR,
     ChunkRing, ChunkRingConfig, JobQueue, JobWorker, WorkerHandle, ChunkJob, JobResult,
-    TerrainGenerator, ChunkPool, MeshPool,
+    TerrainGenerator, ChunkPool, MeshPool, MeshingConfig,
 };
 use render_wgpu::mesh_upload::MeshBuffers;
 
@@ -204,14 +204,27 @@ impl App {
             GameConfig::default()
         });
         
+        // Configure rayon's global threadpool based on worker_threads setting
+        // This affects all parallel operations (meshing, generation, etc.)
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(config.world.worker_threads)
+            .thread_name(|i| format!("voxel-worker-{}", i))
+            .build_global()
+            .expect("Failed to initialize rayon threadpool");
+        
         println!("📋 Configuration loaded:");
         println!("   • Render distance: {:.0} blocks", config.graphics.render_distance);
         println!("   • FOV: {:.0}°", config.graphics.fov_degrees);
-        println!("   • Worker threads: {}", config.world.worker_threads);
+        println!("   • Worker threads: {} (rayon global pool)", config.world.worker_threads);
+        println!("   • Greedy meshing: {}", if config.performance.greedy_meshing { "enabled" } else { "disabled (legacy)" });
         println!("   • Camera speed: {:.1} blocks/s", config.camera.move_speed);
         
-        // Create job queue and start workers
-        let job_queue = Arc::new(JobQueue::new());
+        // Create meshing configuration from settings
+        let meshing_config = MeshingConfig::new(config.performance.greedy_meshing);
+        
+        // Create job queue with meshing config and start workers
+        let terrain_generator = TerrainGenerator::default();
+        let job_queue = Arc::new(JobQueue::with_config(terrain_generator, meshing_config));
         let worker = JobWorker::new(Arc::clone(&job_queue), config.world.worker_threads);
         let worker_handle = worker.start();
         
@@ -542,8 +555,9 @@ impl App {
         if let Some(g) = self.gfx.as_mut() {
             for chunk_pos in &dirty_chunks {
                 if let Some(chunk) = self.chunk_manager.get_chunk(*chunk_pos) {
-                    // Use greedy mesher with atlas and chunk manager for seamless meshing
-                    let mesh = greedy_mesh_chunk(chunk, Some(&self.chunk_manager), &self.texture_atlas);
+                    // Use meshing algorithm based on config setting (following strategy pattern)
+                    let meshing_config = MeshingConfig::new(self.config.performance.greedy_meshing);
+                    let mesh = meshing_config.mesh_chunk(chunk, Some(&self.chunk_manager), &self.texture_atlas);
                     
                     // Convert to vertex bytes (VertexTex format)
                     use bytemuck::cast_slice;

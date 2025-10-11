@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 use crate::chunk::Chunk;
 use crate::meshing::MeshData;
 use crate::generator::TerrainGenerator;
+use crate::meshing_config::MeshingConfig;
 
 /// Job types in the pipeline
 #[derive(Debug, Clone)]
@@ -65,6 +66,9 @@ pub struct JobQueue {
     
     /// Terrain generator for chunk generation
     terrain_generator: Arc<TerrainGenerator>,
+    
+    /// Meshing configuration (controls which algorithm to use)
+    meshing_config: Arc<MeshingConfig>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -84,22 +88,24 @@ pub struct JobStats {
 
 impl JobQueue {
     pub fn new() -> Self {
-        Self {
-            pending: Arc::new(Mutex::new(VecDeque::new())),
-            completed: Arc::new(Mutex::new(Vec::new())),
-            stats: Arc::new(Mutex::new(JobStats::default())),
-            terrain_generator: Arc::new(TerrainGenerator::default()),
-        }
+        Self::with_config(TerrainGenerator::default(), MeshingConfig::default())
     }
     
-    /// Create a new job queue with a custom terrain generator
-    pub fn with_generator(generator: TerrainGenerator) -> Self {
+    /// Create a new job queue with custom configuration
+    pub fn with_config(generator: TerrainGenerator, meshing_config: MeshingConfig) -> Self {
         Self {
             pending: Arc::new(Mutex::new(VecDeque::new())),
             completed: Arc::new(Mutex::new(Vec::new())),
             stats: Arc::new(Mutex::new(JobStats::default())),
             terrain_generator: Arc::new(generator),
+            meshing_config: Arc::new(meshing_config),
         }
+    }
+    
+    /// Create a new job queue with a custom terrain generator (deprecated, use with_config)
+    #[deprecated(note = "Use with_config instead to specify both generator and meshing config")]
+    pub fn with_generator(generator: TerrainGenerator) -> Self {
+        Self::with_config(generator, MeshingConfig::default())
     }
     
     /// Add a job to the queue
@@ -212,11 +218,11 @@ impl JobQueue {
                     use std::time::Instant;
                     
                     let start = Instant::now();
+                    let meshing_config = Arc::clone(&self.meshing_config);
                     let result = catch_unwind(AssertUnwindSafe(|| {
-                        // Use greedy mesher without neighbors for async meshing
-                        // We pass None for chunk_manager since we don't have access to it here
+                        // Use configured meshing strategy
                         let atlas = crate::atlas::TextureAtlas::new_16x16();
-                        crate::meshing::greedy_mesh_chunk(&chunk, None, &atlas)
+                        meshing_config.mesh_chunk_standalone(&chunk, &atlas)
                     }));
                     let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
                     
@@ -253,8 +259,10 @@ impl JobQueue {
                     }
                     
                     let atlas = crate::atlas::TextureAtlas::new_16x16();
+                    let meshing_config = Arc::clone(&self.meshing_config);
                     let result = catch_unwind(AssertUnwindSafe(move || {
-                        crate::meshing::mesh_chunks_parallel(&chunks, &temp_manager, &atlas)
+                        // Use configured meshing strategy for parallel meshing
+                        meshing_config.mesh_chunks_parallel(&chunks, &temp_manager, &atlas)
                     }));
                     let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
                     

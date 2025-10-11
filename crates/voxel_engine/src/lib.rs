@@ -4,6 +4,7 @@
 // ChunkV2: Modern chunk system with BlockId, palette, dirty flags, and world coordinates
 pub mod chunk;
 pub mod meshing;
+pub mod meshing_config;
 pub mod atlas;
 pub mod raycast;
 
@@ -34,6 +35,7 @@ pub use chunk::{
 
 pub use meshing::{
     mesh_chunk_v2 as mesh_chunk, 
+    mesh_chunk_with_ao,
     MeshPosUv,
     MeshData,
     SeparatedMesh,
@@ -49,6 +51,7 @@ pub use chunk_ring::{ChunkRing, ChunkRingConfig, world_to_chunk, chunk_to_world}
 pub use job_queue::{JobQueue, JobWorker, WorkerHandle, ChunkJob, JobResult};
 pub use generator::{TerrainGenerator, TerrainConfig, Biome};
 pub use storage::{ChunkPool, MeshPool};
+pub use meshing_config::MeshingConfig;
 
 // Milestone 1 exports
 pub use voxel_schema::{
