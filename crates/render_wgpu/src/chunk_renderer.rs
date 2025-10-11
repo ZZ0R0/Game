@@ -159,12 +159,6 @@ impl ChunkRenderer {
         self.stats.rendered_triangles = rendered_triangles;
         self.stats.draw_calls = visible.len() as u32;
         
-        // Diagnostic: Log when we have visible chunks to render
-        if visible.len() > 0 {
-            println!("🎨 ChunkRenderer: {} visible chunks, {} culled, {} triangles, {} draw calls", 
-                visible.len(), culled, rendered_triangles, self.stats.draw_calls);
-        }
-        
         visible
     }
     

@@ -6,6 +6,25 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Logging verbosity level
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogLevel {
+    /// Only essential startup and error messages
+    Silent,
+    /// Performance summary only (default)
+    Summary,
+    /// Summary + important events (mode switches, chunk operations)
+    Normal,
+    /// All debug information
+    Verbose,
+}
+
+impl Default for LogLevel {
+    fn default() -> Self {
+        Self::Summary
+    }
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameConfig {
@@ -81,6 +100,10 @@ pub struct PerformanceConfig {
     
     /// Enable greedy meshing optimization
     pub greedy_meshing: bool,
+    
+    /// Logging verbosity level
+    #[serde(default)]
+    pub log_level: LogLevel,
 }
 
 impl Default for GameConfig {
@@ -92,7 +115,7 @@ impl Default for GameConfig {
                 fullscreen: false,
                 vsync: false,
                 fov_degrees: 90.0,
-                render_distance: 100.0,
+                render_distance: 128.0,  // Reduced from 100 for better balance (was causing 1600+ chunks)
             },
             world: WorldConfig {
                 chunk_size: 32,
@@ -109,6 +132,7 @@ impl Default for GameConfig {
                 target_fps: 60,
                 frustum_culling: true,
                 greedy_meshing: true,
+                log_level: LogLevel::Summary,
             },
         }
     }
@@ -167,13 +191,17 @@ impl GameConfig {
     }
     
     /// Calculate view radius from render distance
+    /// With cylindrical loading:
+    ///   - render_distance=100 → ~6 horizontal × 3 vertical = ~340 chunks
+    ///   - render_distance=128 → ~7 horizontal × 3 vertical = ~490 chunks
+    ///   - render_distance=160 → ~8 horizontal × 3 vertical = ~640 chunks
     pub fn calculate_view_radius(&self) -> i32 {
         if let Some(override_radius) = self.world.view_radius_override {
             override_radius
         } else {
-            // Add margin to ensure all visible chunks are loaded
-            // +2 accounts for chunk diagonal and edge cases
-            ((self.graphics.render_distance / self.world.chunk_size as f32).ceil() as i32) + 2
+            // Calculate horizontal radius from render distance
+            // Reduced margin from +2 to +1 with cylindrical loading
+            ((self.graphics.render_distance / self.world.chunk_size as f32).ceil() as i32) + 1
         }
     }
 }

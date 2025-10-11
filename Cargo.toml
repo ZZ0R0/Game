@@ -3,22 +3,8 @@ members = [
   "crates/engine_app",
   "crates/render_wgpu",
   "crates/engine_core",
-  "crates/engine_ecs",
   "crates/voxel_engine",
-  "crates/physics_engine",
-  "crates/scripting_host",
-  "crates/asset_pipeline",
-  "crates/save_load",
-  "crates/netcode",
-  "crates/ui_egui",
-  "crates/gameplay_rts",
-  "crates/pathfinding",
   "crates/math_util",
-  "crates/editor",
-  "crates/tools_cli",
-  "crates/data_formats",
-  "crates/ai",
-  "crates/input_bindings",
 ]
 resolver = "2"
 

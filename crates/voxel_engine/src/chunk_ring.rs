@@ -24,9 +24,9 @@ pub struct ChunkRingConfig {
 impl Default for ChunkRingConfig {
     fn default() -> Self {
         Self {
-            view_radius: 8,          // 8 chunks = 256 blocks
-            generation_radius: 10,   // Generate 2 chunks ahead
-            unload_radius: 12,       // Unload 4 chunks beyond generation
+            view_radius: 4,          // 4 chunks = 128 blocks (OPTIMIZED for performance)
+            generation_radius: 5,    // Generate 1 chunk ahead
+            unload_radius: 6,        // Unload 1 chunk beyond generation
         }
     }
 }
@@ -106,6 +106,16 @@ impl ChunkRing {
     }
     
     /// Calculate all chunks within a radius (spherical, 3D)
+    /// 
+    /// Uses true spherical distance in 3D space for optimal chunk loading.
+    /// 
+    /// Expected chunk counts:
+    /// - radius 4: ~268 chunks (4/3 × π × 4³ ≈ 268)
+    /// - radius 5: ~523 chunks (4/3 × π × 5³ ≈ 523)
+    /// - radius 6: ~904 chunks (4/3 × π × 6³ ≈ 904)
+    /// - radius 8: ~2144 chunks (4/3 × π × 8³ ≈ 2144)
+    /// 
+    /// Note: Actual count is slightly less due to discrete grid sampling
     fn calculate_chunks_in_radius(&self, center: IVec3, radius: i32) -> HashSet<IVec3> {
         let mut chunks = HashSet::new();
         
@@ -120,6 +130,7 @@ impl ChunkRing {
                     let dz = z - center.z;
                     let dist_sq = dx * dx + dy * dy + dz * dz;
                     
+                    // Spherical distance check
                     if dist_sq <= radius_sq {
                         chunks.insert(IVec3::new(x, y, z));
                     }

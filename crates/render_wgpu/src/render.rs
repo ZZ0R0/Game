@@ -36,6 +36,8 @@ impl<'w> Gfx<'w> {
                     let stats = &self.chunk_renderer.stats;
                     if stats.total_chunks > 0 {
                         ui.separator();
+                        ui.label(format!("Pos: ({:.1}, {:.1}, {:.1})", self.cam_eye.x, self.cam_eye.y, self.cam_eye.z));
+                        ui.separator();
                         ui.label(format!("View: {:.0}m", self.fov_distance));
                         ui.separator();
                         ui.label(format!("Chunks: {}/{}", stats.visible_chunks, stats.total_chunks));

@@ -2,18 +2,18 @@
   "graphics": {
     "window_width": 1920,
     "window_height": 1080,
-    "fullscreen": false,
+    "fullscreen": true,
     "vsync": false,
     "fov_degrees": 90.0,
-    "render_distance": 320.0
+    "render_distance": 500.0
   },
   "world": {
     "chunk_size": 32,
-    "worker_threads": 4
+    "worker_threads": 30
   },
   "camera": {
-    "move_speed": 10.0,
-    "sprint_multiplier": 3.0,
+    "move_speed": 30.0,
+    "sprint_multiplier": 10.0,
     "mouse_sensitivity": 0.003,
     "start_position": [
       0.0,
@@ -24,6 +24,7 @@
   "performance": {
     "target_fps": 60,
     "frustum_culling": true,
-    "greedy_meshing": true
+    "greedy_meshing": false,
+    "log_level": "Summary"
   }
 }

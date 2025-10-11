@@ -40,9 +40,18 @@ struct FrameProfiler {
     chunks_loaded: usize,
     chunks_meshed: usize,
     chunks_rendered: usize,
+    chunks_unloaded: usize,
     draw_calls: usize,
     jobs_pending: usize,
     jobs_completed: usize,
+    
+    // Rendering stats (updated each frame)
+    visible_chunks: usize,
+    culled_chunks: usize,
+    rendered_triangles: usize,
+    
+    // Slow frame tracking
+    slow_frames: usize,
     
     // History for averaging
     frame_times: VecDeque<f32>,
@@ -60,9 +69,16 @@ impl FrameProfiler {
             chunks_loaded: 0,
             chunks_meshed: 0,
             chunks_rendered: 0,
+            chunks_unloaded: 0,
             draw_calls: 0,
             jobs_pending: 0,
             jobs_completed: 0,
+            
+            visible_chunks: 0,
+            culled_chunks: 0,
+            rendered_triangles: 0,
+            
+            slow_frames: 0,
             
             frame_times: VecDeque::with_capacity(120),
             last_print: Instant::now(),
@@ -76,6 +92,7 @@ impl FrameProfiler {
         self.rendering_ms = 0.0;
         self.total_frame_ms = 0.0;
         self.chunks_meshed = 0;
+        self.chunks_unloaded = 0;
         self.draw_calls = 0;
         self.jobs_completed = 0;
     }
@@ -89,13 +106,9 @@ impl FrameProfiler {
             self.frame_times.pop_front();
         }
         
-        // Print if slow frame (> 20ms = < 50 FPS)
+        // Track slow frames (> 20ms = < 50 FPS)
         if total_ms > 20.0 {
-            println!("🐌 SLOW FRAME: {:.2}ms", total_ms);
-            println!("   Chunk Loading: {:.2}ms", self.chunk_loading_ms);
-            println!("   Job Processing: {:.2}ms ({} jobs)", self.job_processing_ms, self.jobs_completed);
-            println!("   Rendering: {:.2}ms ({} draw calls)", self.rendering_ms, self.draw_calls);
-            println!("   Chunks: {} loaded, {} rendered", self.chunks_loaded, self.chunks_rendered);
+            self.slow_frames += 1;
         }
         
         // Print summary every second
@@ -105,7 +118,7 @@ impl FrameProfiler {
         }
     }
     
-    fn print_summary(&self) {
+    fn print_summary(&mut self) {
         if self.frame_times.is_empty() {
             return;
         }
@@ -116,14 +129,19 @@ impl FrameProfiler {
         let min_frame = self.frame_times.iter().copied().fold(f32::MAX, f32::min);
         
         println!("\n📊 Performance Summary:");
-        println!("   FPS: {:.1} (avg: {:.2}ms, min: {:.2}ms, max: {:.2}ms)", 
-                 fps, avg_frame, min_frame, max_frame);
+        println!("   FPS: {:.1} (avg: {:.2}ms, min: {:.2}ms, max: {:.2}ms) {} slow frames", 
+                 fps, avg_frame, min_frame, max_frame, self.slow_frames);
         println!("   Breakdown: Load={:.1}ms, Jobs={:.1}ms, Render={:.1}ms",
                  self.chunk_loading_ms, self.job_processing_ms, self.rendering_ms);
-        println!("   Chunks: {} loaded, {} rendered, {} draw calls",
-                 self.chunks_loaded, self.chunks_rendered, self.draw_calls);
+        println!("   Chunks: {} loaded, {} rendered ({} visible, {} culled), {} unloaded",
+                 self.chunks_loaded, self.chunks_rendered, self.visible_chunks, self.culled_chunks, self.chunks_unloaded);
+        println!("   Rendering: {} triangles, {} draw calls",
+                 self.rendered_triangles, self.draw_calls);
         println!("   Jobs: {} pending, {} completed/frame", 
                  self.jobs_pending, self.jobs_completed);
+        
+        // Reset slow frame counter for next interval
+        self.slow_frames = 0;
     }
 }
 
@@ -200,13 +218,17 @@ impl App {
         // Configure chunk ring based on render distance from config
         let view_radius = config.calculate_view_radius();
         
+        // Use spherical loading (true 3D distance) - most appropriate for voxel worlds
         let ring_config = ChunkRingConfig {
-            view_radius,                         // Based on render distance from config
-            generation_radius: view_radius + 2,  // Generate 2 chunks ahead
-            unload_radius: view_radius + 4,      // Unload 4 chunks beyond
+            view_radius,                         // Chunks to render
+            generation_radius: view_radius + 1,  // Generate 1 chunk ahead
+            unload_radius: view_radius + 2,      // Unload 2 chunks beyond
         };
         
-        println!("   • View radius: {} chunks ({} blocks)", view_radius, view_radius * config.world.chunk_size as i32);
+        println!("   • View radius: {} chunks spherical (~{} chunks loaded, {} blocks radius)", 
+                 view_radius, 
+                 (4.0 * std::f32::consts::PI * (view_radius as f32).powi(3) / 3.0) as i32,
+                 view_radius * config.world.chunk_size as i32);
         
         let start_time = Instant::now();
         
@@ -335,10 +357,8 @@ impl App {
                 }
             }
             
-            // Log unloading
-            if unloaded_count > 0 {
-                println!("🗑️  Unloaded {} chunks", unloaded_count);
-            }
+            // Track unloading in profiler
+            self.profiler.chunks_unloaded = unloaded_count;
             
             // Sort chunks by distance from player (Manhattan distance for speed)
             if !to_load.is_empty() {
@@ -380,7 +400,7 @@ impl App {
         
         // Collect chunks to mesh in a batch (with frustum culling)
         let mut chunks_to_mesh = Vec::new();
-        let mut culled_count = 0;
+        let mut _culled_count = 0;
         
         for result in &results {
             match result {
@@ -401,7 +421,7 @@ impl App {
                             chunks_to_mesh.push((*position, Arc::new((*chunk).clone())));
                         } else {
                             // Chunk is outside frustum, skip meshing
-                            culled_count += 1;
+                            _culled_count += 1;
                         }
                     } else {
                         // No frustum available (shouldn't happen), mesh everything
@@ -431,12 +451,6 @@ impl App {
                     // Physics complete (future)
                 }
             }
-        }
-        
-        // Log culling statistics
-        if culled_count > 0 {
-            println!("🔍 Frustum culling: {} chunks outside view, {} chunks to mesh", 
-                     culled_count, chunks_to_mesh.len());
         }
         
         // Submit batch mesh job if we have chunks to mesh
@@ -525,8 +539,6 @@ impl App {
             return;
         }
         
-        println!("Updating {} dirty chunks...", dirty_chunks.len());
-        
         if let Some(g) = self.gfx.as_mut() {
             for chunk_pos in &dirty_chunks {
                 if let Some(chunk) = self.chunk_manager.get_chunk(*chunk_pos) {
@@ -565,11 +577,6 @@ impl App {
                 
                 self.chunk_manager.clear_dirty(*chunk_pos);
             }
-            
-            let stats = &g.chunk_renderer.stats;
-            println!("✓ ChunkRenderer: {} chunks, {} triangles total",
-                     stats.total_chunks,
-                     stats.total_triangles);
         }
     }
 }
@@ -744,6 +751,9 @@ impl ApplicationHandler for App {
                     let stats = &g.chunk_renderer.stats;
                     self.profiler.chunks_rendered = stats.visible_chunks;
                     self.profiler.draw_calls = stats.draw_calls as usize;
+                    self.profiler.visible_chunks = stats.visible_chunks;
+                    self.profiler.culled_chunks = stats.culled_chunks;
+                    self.profiler.rendered_triangles = stats.rendered_triangles as usize;
                 }
                 
                 self.profiler.rendering_ms = render_start.elapsed().as_secs_f32() * 1000.0;

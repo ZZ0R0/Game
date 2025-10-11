@@ -4,7 +4,6 @@
 // ChunkV2: Modern chunk system with BlockId, palette, dirty flags, and world coordinates
 pub mod chunk;
 pub mod meshing;
-pub mod marching_cubes; // Milestone 3: Density mesher
 pub mod atlas;
 pub mod raycast;
 
@@ -40,19 +39,6 @@ pub use meshing::{
     SeparatedMesh,
     greedy_mesh_chunk,
     greedy_mesh_chunk_separated,
-    // Milestone 3 exports
-    MeshBuildOutput,
-    SubmeshRange,
-    MaterialType,
-    AABB,
-    MeshStats,
-};
-
-pub use marching_cubes::{
-    marching_cubes,
-    DensityMesh,
-    DensityMeshConfig,
-    MaterialBlendMode,
 };
 
 pub use atlas::{TextureAtlas, AtlasRect, FaceDir};
