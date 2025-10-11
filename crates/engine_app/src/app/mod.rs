@@ -228,23 +228,20 @@ impl App {
                 }
             }
             
-            // Queue generation jobs for new chunks with priority based on distance from player
+            // Queue generation jobs for new chunks
             for chunk_pos in to_load {
-                // Generate chunk SYNCHRONOUSLY (main thread) - now with parallel rayon
+                // Generate chunk SYNCHRONOUSLY (main thread)
                 let chunk = self.terrain_generator.generate_chunk(chunk_pos);
                 
                 // Insert into chunk manager
                 self.chunk_manager.insert(chunk.clone());
                 self.chunk_ring.mark_loaded(chunk_pos);
                 
-                // Queue meshing job with priority based on distance from player
-                self.job_queue.push_with_priority(
-                    ChunkJob::Mesh {
-                        position: chunk_pos,
-                        chunk: Arc::new(chunk),
-                    },
-                    cam_pos // Pass player position for priority calculation
-                );
+                // Queue meshing job
+                self.job_queue.push(ChunkJob::Mesh {
+                    position: chunk_pos,
+                    chunk: Arc::new(chunk),
+                });
             }
         }
     }
