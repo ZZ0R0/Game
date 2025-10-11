@@ -2,6 +2,8 @@
 use crate::chunk::{Chunk, BlockId, CHUNK_SIZE, ChunkManager};
 use crate::atlas::{TextureAtlas, FaceDir};
 use glam::IVec3;
+use rayon::prelude::*;
+use std::sync::Arc;
 
 /// Mesh data with position, UV, and AO
 #[derive(Debug, Default, Clone)]
@@ -827,6 +829,31 @@ fn emit_greedy_quad_with_ao(
         base, base + 1, base + 2,
         base, base + 2, base + 3,
     ]);
+}
+
+/// Mesh multiple chunks in parallel using Rayon
+/// This function distributes meshing work across all available CPU cores
+/// 
+/// # Arguments
+/// * `chunks` - Slice of (position, chunk) tuples to mesh
+/// * `chunk_manager` - ChunkManager for accessing neighbor chunks (shared read-only)
+/// * `atlas` - TextureAtlas for UV mapping (shared read-only)
+/// 
+/// # Returns
+/// Vec of (position, mesh) tuples in the same order as input
+pub fn mesh_chunks_parallel(
+    chunks: &[(IVec3, Arc<Chunk>)],
+    chunk_manager: &ChunkManager,
+    atlas: &TextureAtlas,
+) -> Vec<(IVec3, MeshData)> {
+    chunks
+        .par_iter()
+        .map(|(position, chunk)| {
+            // Each thread gets its own mesh generation
+            let mesh = greedy_mesh_chunk(chunk, Some(chunk_manager), atlas);
+            (*position, mesh)
+        })
+        .collect()
 }
 
 //==============================================================================

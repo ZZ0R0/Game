@@ -3,6 +3,7 @@
 //! Uses noise functions to create varied terrain with hills, valleys, and features
 
 use glam::IVec3;
+use rayon::prelude::*;
 use crate::chunk::{Chunk, CHUNK_SIZE, BlockId, STONE, DIRT, GRASS, AIR, WATER};
 
 /// Terrain generator configuration
@@ -86,6 +87,18 @@ impl TerrainGenerator {
         }
         
         chunk
+    }
+    
+    /// Generate multiple chunks in parallel using all available CPU cores
+    /// Positions should be pre-sorted by distance from player for optimal loading
+    pub fn generate_chunks_parallel(&self, positions: &[IVec3]) -> Vec<(IVec3, Chunk)> {
+        positions
+            .par_iter()
+            .map(|&position| {
+                let chunk = self.generate_chunk(position);
+                (position, chunk)
+            })
+            .collect()
     }
     
     /// Calculate terrain height at world XZ coordinates

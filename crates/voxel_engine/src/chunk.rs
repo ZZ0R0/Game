@@ -192,6 +192,47 @@ impl Chunk {
         }
     }
     
+    /// Get world-space axis-aligned bounding box for this chunk
+    /// Supports grid transform for multi-grid systems (e.g., spaceships)
+    /// 
+    /// # Arguments
+    /// * `grid_transform` - Transform matrix from chunk-local space to world space
+    ///                     Use Mat4::IDENTITY for static terrain
+    /// 
+    /// # Returns
+    /// (min, max) corners of the AABB in world space
+    pub fn world_aabb(&self, grid_transform: glam::Mat4) -> (glam::Vec3, glam::Vec3) {
+        let chunk_size = CHUNK_SIZE as f32;
+        
+        // Calculate local-space bounds
+        let local_min = self.position.as_vec3() * chunk_size;
+        let local_max = local_min + glam::Vec3::splat(chunk_size);
+        
+        // Transform all 8 corners to world space
+        let corners = [
+            glam::Vec3::new(local_min.x, local_min.y, local_min.z),
+            glam::Vec3::new(local_max.x, local_min.y, local_min.z),
+            glam::Vec3::new(local_min.x, local_max.y, local_min.z),
+            glam::Vec3::new(local_max.x, local_max.y, local_min.z),
+            glam::Vec3::new(local_min.x, local_min.y, local_max.z),
+            glam::Vec3::new(local_max.x, local_min.y, local_max.z),
+            glam::Vec3::new(local_min.x, local_max.y, local_max.z),
+            glam::Vec3::new(local_max.x, local_max.y, local_max.z),
+        ];
+        
+        let transformed: Vec<_> = corners.iter()
+            .map(|&corner| grid_transform.transform_point3(corner))
+            .collect();
+        
+        // Find axis-aligned bounds of transformed corners
+        let world_min = transformed.iter()
+            .fold(glam::Vec3::splat(f32::MAX), |acc, &v| acc.min(v));
+        let world_max = transformed.iter()
+            .fold(glam::Vec3::splat(f32::MIN), |acc, &v| acc.max(v));
+        
+        (world_min, world_max)
+    }
+    
     /// Fill with GPU stress test pattern
     pub fn fill_gpu_stress_test(&mut self) {
         let center = CHUNK_SIZE as f32 / 2.0;

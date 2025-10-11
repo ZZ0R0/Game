@@ -89,6 +89,10 @@ impl<'w> Gfx<'w> {
         
         let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.1, self.fov_distance);
         let vp = proj * view;
+        
+        // Update frustum for culling
+        self.frustum = math_util::Frustum::from_matrix(vp);
+        
         let ubo = CameraUBO { vp: vp.to_cols_array_2d() };
         self.queue.write_buffer(&self.cam_buf, 0, bytemuck::bytes_of(&ubo));
     }

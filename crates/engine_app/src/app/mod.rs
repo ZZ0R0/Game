@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 use std::sync::Arc;
+use std::collections::VecDeque;
 
 use engine_core::Engine;
 use glam::{Mat4, IVec3};
@@ -26,6 +27,105 @@ use crate::config::GameConfig;
 
 mod state;
 use state::Input;
+
+/// Frame profiler for tracking performance of major systems
+#[derive(Debug, Clone)]
+struct FrameProfiler {
+    chunk_loading_ms: f32,
+    job_processing_ms: f32,
+    rendering_ms: f32,
+    total_frame_ms: f32,
+    
+    // Counters
+    chunks_loaded: usize,
+    chunks_meshed: usize,
+    chunks_rendered: usize,
+    draw_calls: usize,
+    jobs_pending: usize,
+    jobs_completed: usize,
+    
+    // History for averaging
+    frame_times: VecDeque<f32>,
+    last_print: Instant,
+}
+
+impl FrameProfiler {
+    fn new() -> Self {
+        Self {
+            chunk_loading_ms: 0.0,
+            job_processing_ms: 0.0,
+            rendering_ms: 0.0,
+            total_frame_ms: 0.0,
+            
+            chunks_loaded: 0,
+            chunks_meshed: 0,
+            chunks_rendered: 0,
+            draw_calls: 0,
+            jobs_pending: 0,
+            jobs_completed: 0,
+            
+            frame_times: VecDeque::with_capacity(120),
+            last_print: Instant::now(),
+        }
+    }
+    
+    fn begin_frame(&mut self) {
+        // Reset per-frame counters
+        self.chunk_loading_ms = 0.0;
+        self.job_processing_ms = 0.0;
+        self.rendering_ms = 0.0;
+        self.total_frame_ms = 0.0;
+        self.chunks_meshed = 0;
+        self.draw_calls = 0;
+        self.jobs_completed = 0;
+    }
+    
+    fn end_frame(&mut self, total_ms: f32) {
+        self.total_frame_ms = total_ms;
+        
+        // Add to history
+        self.frame_times.push_back(total_ms);
+        if self.frame_times.len() > 120 {
+            self.frame_times.pop_front();
+        }
+        
+        // Print if slow frame (> 20ms = < 50 FPS)
+        if total_ms > 20.0 {
+            println!("🐌 SLOW FRAME: {:.2}ms", total_ms);
+            println!("   Chunk Loading: {:.2}ms", self.chunk_loading_ms);
+            println!("   Job Processing: {:.2}ms ({} jobs)", self.job_processing_ms, self.jobs_completed);
+            println!("   Rendering: {:.2}ms ({} draw calls)", self.rendering_ms, self.draw_calls);
+            println!("   Chunks: {} loaded, {} rendered", self.chunks_loaded, self.chunks_rendered);
+        }
+        
+        // Print summary every second
+        if self.last_print.elapsed().as_secs_f32() >= 1.0 {
+            self.print_summary();
+            self.last_print = Instant::now();
+        }
+    }
+    
+    fn print_summary(&self) {
+        if self.frame_times.is_empty() {
+            return;
+        }
+        
+        let avg_frame = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
+        let fps = 1000.0 / avg_frame;
+        let max_frame = self.frame_times.iter().copied().fold(0.0f32, f32::max);
+        let min_frame = self.frame_times.iter().copied().fold(f32::MAX, f32::min);
+        
+        println!("\n📊 Performance Summary:");
+        println!("   FPS: {:.1} (avg: {:.2}ms, min: {:.2}ms, max: {:.2}ms)", 
+                 fps, avg_frame, min_frame, max_frame);
+        println!("   Breakdown: Load={:.1}ms, Jobs={:.1}ms, Render={:.1}ms",
+                 self.chunk_loading_ms, self.job_processing_ms, self.rendering_ms);
+        println!("   Chunks: {} loaded, {} rendered, {} draw calls",
+                 self.chunks_loaded, self.chunks_rendered, self.draw_calls);
+        println!("   Jobs: {} pending, {} completed/frame", 
+                 self.jobs_pending, self.jobs_completed);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlMode {
@@ -68,6 +168,9 @@ pub struct App {
     worker_handle: Option<WorkerHandle>,
     voxel_mesh: Option<MeshBuffers>,
     texture_atlas: TextureAtlas,
+    
+    // Performance profiling
+    profiler: FrameProfiler,
     
     // Control mode
     control_mode: ControlMode,
@@ -134,6 +237,7 @@ impl App {
             worker_handle: Some(worker_handle),
             voxel_mesh: None,
             texture_atlas: TextureAtlas::new_16x16(),
+            profiler: FrameProfiler::new(),
             control_mode: ControlMode::UI,  // Start in UI mode
             fullscreen: false,
         }
@@ -215,6 +319,7 @@ impl App {
             let (to_load, to_unload) = self.chunk_ring.update(cam_pos);
             
             // Unload chunks that are too far
+            let mut unloaded_count = 0;
             for chunk_pos in to_unload {
                 if let Some(chunk) = self.chunk_manager.remove(chunk_pos) {
                     // Return chunk to pool for reuse
@@ -225,23 +330,33 @@ impl App {
                     if let Some(gfx) = self.gfx.as_mut() {
                         gfx.chunk_renderer.remove_chunk(chunk_pos);
                     }
+                    
+                    unloaded_count += 1;
                 }
             }
             
-            // Queue generation jobs for new chunks
-            for chunk_pos in to_load {
-                // Generate chunk SYNCHRONOUSLY (main thread)
-                let chunk = self.terrain_generator.generate_chunk(chunk_pos);
+            // Log unloading
+            if unloaded_count > 0 {
+                println!("🗑️  Unloaded {} chunks", unloaded_count);
+            }
+            
+            // Sort chunks by distance from player (Manhattan distance for speed)
+            if !to_load.is_empty() {
+                let camera_chunk = voxel_engine::world_to_chunk(cam_pos);
+                let mut sorted_chunks: Vec<IVec3> = to_load.into_iter().collect();
                 
-                // Insert into chunk manager
-                self.chunk_manager.insert(chunk.clone());
-                self.chunk_ring.mark_loaded(chunk_pos);
-                
-                // Queue meshing job
-                self.job_queue.push(ChunkJob::Mesh {
-                    position: chunk_pos,
-                    chunk: Arc::new(chunk),
+                // Sort by Manhattan distance (closest first)
+                sorted_chunks.sort_by_key(|&chunk_pos| {
+                    let delta = chunk_pos - camera_chunk;
+                    delta.x.abs() + delta.y.abs() + delta.z.abs()
                 });
+                
+                // Submit as batch job for parallel generation
+                if !sorted_chunks.is_empty() {
+                    self.job_queue.push(ChunkJob::GenerateBatch {
+                        positions: sorted_chunks,
+                    });
+                }
             }
         }
     }
@@ -249,7 +364,23 @@ impl App {
     /// Process completed jobs from worker threads
     fn process_completed_jobs(&mut self) {
         let results = self.job_queue.drain_completed();
-        if !results.is_empty() {
+        
+        // FIX: Count jobs before consuming
+        let job_count = results.len();
+        
+        if results.is_empty() {
+            return;
+        }
+        
+        // Track this for profiling
+        self.profiler.jobs_completed = job_count;
+        
+        // Get frustum from render context for culling
+        let frustum = self.gfx.as_ref().map(|g| g.frustum.clone());
+        
+        // Collect chunks to mesh in a batch (with frustum culling)
+        let mut chunks_to_mesh = Vec::new();
+        let mut culled_count = 0;
         
         for result in &results {
             match result {
@@ -258,16 +389,38 @@ impl App {
                     self.chunk_manager.insert(chunk.clone());
                     self.chunk_ring.mark_loaded(*position);
                     
-                    // Queue meshing
-                    self.job_queue.push(ChunkJob::Mesh {
-                        position: *position,
-                        chunk: Arc::new((*chunk).clone()),
-                    });
+                    // FRUSTUM CULLING: Only mesh chunks visible to camera
+                    if let Some(ref frustum) = frustum {
+                        // For now, use identity transform (static terrain)
+                        // TODO: Support multiple grids with transforms
+                        let grid_transform = glam::Mat4::IDENTITY;
+                        let (min, max) = chunk.world_aabb(grid_transform);
+                        
+                        if frustum.intersects_aabb(min, max) {
+                            // Chunk is visible, add to mesh batch
+                            chunks_to_mesh.push((*position, Arc::new((*chunk).clone())));
+                        } else {
+                            // Chunk is outside frustum, skip meshing
+                            culled_count += 1;
+                        }
+                    } else {
+                        // No frustum available (shouldn't happen), mesh everything
+                        chunks_to_mesh.push((*position, Arc::new((*chunk).clone())));
+                    }
                 }
                 
                 JobResult::Meshed { position, mesh } => {
                     // Mesh generated, upload to GPU
+                    self.profiler.chunks_meshed += 1;
                     self.upload_chunk_mesh(*position, mesh.clone());
+                }
+                
+                JobResult::MeshedBatch { meshes } => {
+                    // Batch meshing completed, upload all meshes to GPU
+                    self.profiler.chunks_meshed += meshes.len();
+                    for (position, mesh) in meshes {
+                        self.upload_chunk_mesh(*position, mesh.clone());
+                    }
                 }
                 
                 JobResult::Uploaded { position: _ } => {
@@ -279,6 +432,18 @@ impl App {
                 }
             }
         }
+        
+        // Log culling statistics
+        if culled_count > 0 {
+            println!("🔍 Frustum culling: {} chunks outside view, {} chunks to mesh", 
+                     culled_count, chunks_to_mesh.len());
+        }
+        
+        // Submit batch mesh job if we have chunks to mesh
+        if !chunks_to_mesh.is_empty() {
+            self.job_queue.push(ChunkJob::MeshBatch {
+                chunks: chunks_to_mesh,
+            });
         }
     }
     
@@ -536,6 +701,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                // Profile: Rendering
+                let render_start = Instant::now();
+                
                 self.frames += 1;
                 let now = Instant::now();
                 let dt = now.duration_since(self.last_fps_t);
@@ -571,13 +739,24 @@ impl ApplicationHandler for App {
                             wgpu::SurfaceError::Timeout => {}
                         }
                     }
+                    
+                    // Get actual render stats AFTER rendering completes
+                    let stats = &g.chunk_renderer.stats;
+                    self.profiler.chunks_rendered = stats.visible_chunks;
+                    self.profiler.draw_calls = stats.draw_calls as usize;
                 }
+                
+                self.profiler.rendering_ms = render_start.elapsed().as_secs_f32() * 1000.0;
             }
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, _el: &ActiveEventLoop) {
+        // Begin frame profiling
+        let frame_start = Instant::now();
+        self.profiler.begin_frame();
+        
         let now = Instant::now();
         while now >= self.next_tick {
             if let Some(g) = self.gfx.as_mut() {
@@ -605,11 +784,23 @@ impl ApplicationHandler for App {
                 g.set_model(model);
             }
             
-            // Update chunk loading based on camera position
+            // Profile: Chunk Loading
+            let t0 = Instant::now();
             self.update_chunk_loading();
+            self.profiler.chunk_loading_ms = t0.elapsed().as_secs_f32() * 1000.0;
             
-            // Process completed jobs from workers
+            // Profile: Job Processing
+            let t1 = Instant::now();
             self.process_completed_jobs();
+            self.profiler.job_processing_ms = t1.elapsed().as_secs_f32() * 1000.0;
+            
+            // Update job queue stats
+            let job_stats = self.job_queue.get_stats();
+            self.profiler.jobs_pending = job_stats.pending_count;
+            self.profiler.jobs_completed = job_stats.completed_count;
+            
+            // Update chunk count
+            self.profiler.chunks_loaded = self.chunk_ring.loaded_count();
             
             // Update dirty chunks (from block editing)
             self.update_dirty_chunks();
@@ -617,6 +808,11 @@ impl ApplicationHandler for App {
             self.engine.tick_once();
             self.next_tick += self.dt;
         }
+        
+        // End frame profiling
+        let total_frame_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
+        self.profiler.end_frame(total_frame_ms);
+        
         if let Some(w) = self.window {
             w.request_redraw(); }
     }

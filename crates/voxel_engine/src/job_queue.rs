@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use crate::chunk::Chunk;
 use crate::meshing::MeshData;
+use crate::generator::TerrainGenerator;
 
 /// Job types in the pipeline
 #[derive(Debug, Clone)]
@@ -16,8 +17,14 @@ pub enum ChunkJob {
     /// Generate terrain for a chunk
     Generate { position: IVec3 },
     
+    /// Generate multiple chunks in parallel (uses all CPU cores)
+    GenerateBatch { positions: Vec<IVec3> },
+    
     /// Generate mesh from chunk data
     Mesh { position: IVec3, chunk: Arc<Chunk> },
+    
+    /// Mesh multiple chunks in parallel (uses all CPU cores)
+    MeshBatch { chunks: Vec<(IVec3, Arc<Chunk>)> },
     
     /// Upload mesh to GPU
     Upload { position: IVec3, mesh: MeshData },
@@ -34,6 +41,9 @@ pub enum JobResult {
     
     /// Meshing completed
     Meshed { position: IVec3, mesh: MeshData },
+    
+    /// Batch meshing completed (multiple chunks meshed in parallel)
+    MeshedBatch { meshes: Vec<(IVec3, MeshData)> },
     
     /// Upload completed
     Uploaded { position: IVec3 },
@@ -52,6 +62,9 @@ pub struct JobQueue {
     
     /// Job statistics
     stats: Arc<Mutex<JobStats>>,
+    
+    /// Terrain generator for chunk generation
+    terrain_generator: Arc<TerrainGenerator>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -75,6 +88,17 @@ impl JobQueue {
             pending: Arc::new(Mutex::new(VecDeque::new())),
             completed: Arc::new(Mutex::new(Vec::new())),
             stats: Arc::new(Mutex::new(JobStats::default())),
+            terrain_generator: Arc::new(TerrainGenerator::default()),
+        }
+    }
+    
+    /// Create a new job queue with a custom terrain generator
+    pub fn with_generator(generator: TerrainGenerator) -> Self {
+        Self {
+            pending: Arc::new(Mutex::new(VecDeque::new())),
+            completed: Arc::new(Mutex::new(Vec::new())),
+            stats: Arc::new(Mutex::new(JobStats::default())),
+            terrain_generator: Arc::new(generator),
         }
     }
     
@@ -121,8 +145,9 @@ impl JobQueue {
                     use std::time::Instant;
                     
                     let start = Instant::now();
-                    let result = catch_unwind(AssertUnwindSafe(|| {
-                        self.generate_chunk(position)
+                    let generator = Arc::clone(&self.terrain_generator);
+                    let result = catch_unwind(AssertUnwindSafe(move || {
+                        generator.generate_chunk(position)
                     }));
                     let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
                     
@@ -136,6 +161,45 @@ impl JobQueue {
                         }
                         Err(e) => {
                             eprintln!("❌ PANIC in generate worker for chunk {:?}: {:?}", position, e);
+                            None
+                        }
+                    }
+                }
+                
+                ChunkJob::GenerateBatch { positions } => {
+                    // Generate multiple chunks in parallel using rayon
+                    use std::panic::catch_unwind;
+                    use std::panic::AssertUnwindSafe;
+                    use std::time::Instant;
+                    
+                    let start = Instant::now();
+                    let num_chunks = positions.len();
+                    let generator = Arc::clone(&self.terrain_generator);
+                    let result = catch_unwind(AssertUnwindSafe(move || {
+                        generator.generate_chunks_parallel(&positions)
+                    }));
+                    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+                    
+                    match result {
+                        Ok(chunks) => {
+                            // Update stats
+                            let chunk_count = chunks.len() as u64;
+                            let mut stats = self.stats.lock().unwrap();
+                            stats.total_generated += chunk_count;
+                            stats.total_generation_time_ms += elapsed_ms;
+                            stats.avg_generation_time_ms = stats.total_generation_time_ms / stats.total_generated as f32;
+                            drop(stats);
+                            
+                            // Push all generated chunks to completed queue
+                            let mut completed = self.completed.lock().unwrap();
+                            for (position, chunk) in chunks {
+                                completed.push(JobResult::Generated { position, chunk });
+                            }
+                            
+                            None // We already pushed results directly
+                        }
+                        Err(e) => {
+                            eprintln!("❌ PANIC in batch generate worker for {} chunks: {:?}", num_chunks, e);
                             None
                         }
                     }
@@ -167,6 +231,46 @@ impl JobQueue {
                         Err(e) => {
                             eprintln!("❌ PANIC in mesh worker for chunk {:?}: {:?}", position, e);
                             // Return empty mesh or skip
+                            None
+                        }
+                    }
+                }
+                
+                ChunkJob::MeshBatch { chunks } => {
+                    // Mesh multiple chunks in parallel using rayon
+                    use std::panic::catch_unwind;
+                    use std::panic::AssertUnwindSafe;
+                    use std::time::Instant;
+                    
+                    let start = Instant::now();
+                    let num_chunks = chunks.len();
+                    
+                    // We need ChunkManager to access neighbors
+                    // For now, we'll create a temporary ChunkManager from the chunks
+                    let mut temp_manager = crate::ChunkManager::new();
+                    for (_pos, chunk) in &chunks {
+                        temp_manager.insert((**chunk).clone());
+                    }
+                    
+                    let atlas = crate::atlas::TextureAtlas::new_16x16();
+                    let result = catch_unwind(AssertUnwindSafe(move || {
+                        crate::meshing::mesh_chunks_parallel(&chunks, &temp_manager, &atlas)
+                    }));
+                    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+                    
+                    match result {
+                        Ok(meshes) => {
+                            // Update stats
+                            let chunk_count = meshes.len() as u64;
+                            let mut stats = self.stats.lock().unwrap();
+                            stats.total_meshed += chunk_count;
+                            stats.total_meshing_time_ms += elapsed_ms;
+                            stats.avg_meshing_time_ms = stats.total_meshing_time_ms / stats.total_meshed as f32;
+                            
+                            Some(JobResult::MeshedBatch { meshes })
+                        }
+                        Err(e) => {
+                            eprintln!("❌ PANIC in batch mesh worker for {} chunks: {:?}", num_chunks, e);
                             None
                         }
                     }
@@ -267,13 +371,6 @@ impl JobQueue {
         let mut stats = self.stats.lock().unwrap();
         stats.pending_count = 0;
         stats.completed_count = 0;
-    }
-    
-    /// Placeholder: Generate a chunk (will use TerrainGenerator later)
-    fn generate_chunk(&self, position: IVec3) -> Chunk {
-        // For now, create an empty chunk
-        // Will be replaced by terrain generator
-        Chunk::new(position)
     }
 }
 

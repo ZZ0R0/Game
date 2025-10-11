@@ -10,6 +10,7 @@ use egui::{Context as EguiCtx, ViewportId};
 use egui_wgpu::{Renderer as EguiRenderer};
 use egui_winit::State as EguiWinit;
 use glam::{Mat4, Vec3};
+use math_util::Frustum;
 use crate::winit::{dpi::PhysicalSize, window::Window};
 
 use crate::pipeline::create_pipeline_with_shader;
@@ -45,6 +46,9 @@ pub struct Gfx<'w> {
     pub cam_target: Vec3,
     pub cam_yaw: f32,
     pub cam_pitch: f32,
+    
+    // Frustum for culling
+    pub frustum: Frustum,
 
     pub(crate) cam_buf: crate::wgpu::Buffer,
     pub(crate) cam_bg: crate::wgpu::BindGroup,
@@ -375,6 +379,9 @@ impl<'w> Gfx<'w> {
         // Far plane should be larger than render distance to avoid clipping
         // Use 2x render distance to ensure all visible chunks are rendered
         let fov_distance = render_distance.unwrap_or(1000.0) * 2.0;
+        
+        // Initialize frustum (will be updated in write_camera)
+        let initial_frustum = Frustum::from_matrix(Mat4::IDENTITY);
 
         let mut gfx = Self {
             surface,
@@ -398,6 +405,7 @@ impl<'w> Gfx<'w> {
             cam_target,
             cam_yaw,
             cam_pitch,
+            frustum: initial_frustum,
             cam_buf,
             cam_bg,
             obj_buf,
