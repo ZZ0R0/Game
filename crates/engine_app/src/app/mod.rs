@@ -23,6 +23,7 @@ use rwinit::{
 };
 
 use crate::config::GameConfig;
+use crate::spectator_camera::SpectatorCamera;
 
 mod state;
 use state::Input;
@@ -206,6 +207,9 @@ pub struct App {
     // Control mode
     control_mode: ControlMode,
     fullscreen: bool,
+
+    // Spectator camera system
+    spectator_camera: SpectatorCamera,
 }
 
 impl App {
@@ -311,6 +315,7 @@ impl App {
             profiler: FrameProfiler::new(),
             control_mode: ControlMode::UI, // Start in UI mode
             fullscreen: false,
+            spectator_camera: SpectatorCamera::new(),
         }
     }
 
@@ -349,6 +354,22 @@ impl App {
             } else {
                 window.set_fullscreen(None);
                 println!("Fullscreen: OFF");
+            }
+        }
+    }
+
+    /// Toggle spectator camera mode
+    fn toggle_spectator_mode(&mut self) {
+        if let Some(g) = self.gfx.as_mut() {
+            if self.spectator_camera.is_active() {
+                // Désactive la caméra spectateur, revient à la caméra principale
+                self.spectator_camera.deactivate();
+                println!("Spectator mode: OFF (main camera active)");
+            } else {
+                // Active la caméra spectateur en copiant la position actuelle de la caméra principale
+                self.spectator_camera.copy_from_main_camera(g.cam_eye, g.cam_yaw, g.cam_pitch);
+                self.spectator_camera.activate();
+                println!("Spectator mode: ON (spectator camera active)");
             }
         }
     }
@@ -720,10 +741,17 @@ impl ApplicationHandler for App {
         if self.control_mode == ControlMode::Game {
             if let DeviceEvent::MouseMotion { delta } = event {
                 if let (Some(g), Some(w)) = (self.gfx.as_mut(), self.window) {
-                    let sensitivity = self.config.camera.mouse_sensitivity;
-                    let dx = delta.0 as f32 * sensitivity;
-                    let dy = -(delta.1 as f32) * sensitivity;
-                    g.rotate_camera(dx, dy);
+                    let dx = delta.0 as f32;
+                    let dy = -(delta.1 as f32);
+                    
+                    if self.spectator_camera.is_active() {
+                        // Utilise la sensibilité de la caméra spectateur
+                        self.spectator_camera.rotate(dx, dy);
+                    } else {
+                        // Utilise la caméra principale avec sa sensibilité
+                        let sensitivity = self.config.camera.mouse_sensitivity;
+                        g.rotate_camera(dx * sensitivity, dy * sensitivity);
+                    }
                     w.request_redraw();
                 }
             }
@@ -766,6 +794,10 @@ impl ApplicationHandler for App {
                                 if let Some(g) = self.gfx.as_mut() {
                                     g.toggle_wireframe();
                                 }
+                            }
+                            KeyCode::KeyP => {
+                                // P toggles spectator camera mode
+                                self.toggle_spectator_mode();
                             }
                             KeyCode::Escape => {
                                 // ESC toggles between Game and UI mode
@@ -836,6 +868,15 @@ impl ApplicationHandler for App {
                 }
 
                 if let (Some(g), Some(w)) = (self.gfx.as_mut(), self.window) {
+                    // Configure la caméra de rendu selon le mode actif
+                    if self.spectator_camera.is_active() {
+                        // Utilise la caméra spectateur pour le rendu
+                        g.set_render_camera(self.spectator_camera.position, self.spectator_camera.target);
+                    } else {
+                        // Utilise la caméra principale (comportement par défaut)
+                        g.update_main_camera();
+                    }
+
                     if let Err(e) = g.render_with(w, &self.fg, self.voxel_mesh.as_ref()) {
                         match e {
                             wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated => {
@@ -888,7 +929,18 @@ impl ApplicationHandler for App {
                     - self.input.held(KeyCode::KeyC) as i32) as f32;
 
                 if forward != 0.0 || right != 0.0 || up != 0.0 {
-                    g.move_camera(forward * speed, right * speed, up * speed);
+                    if self.spectator_camera.is_active() {
+                        // Utilise la caméra spectateur avec sa propre vitesse
+                        let spectator_speed = self.spectator_camera.move_speed * self.dt.as_secs_f32();
+                        self.spectator_camera.move_camera(
+                            forward * spectator_speed, 
+                            right * spectator_speed, 
+                            up * spectator_speed
+                        );
+                    } else {
+                        // Utilise la caméra principale normale
+                        g.move_camera(forward * speed, right * speed, up * speed);
+                    }
                 }
 
                 // rotate quad (disabled for voxels - set to identity)

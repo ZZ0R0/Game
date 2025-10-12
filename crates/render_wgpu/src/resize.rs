@@ -96,6 +96,36 @@ impl<'w> Gfx<'w> {
         proj * view
     }
 
+    /// Get view-projection matrix with custom camera position and target
+    pub fn get_vp_matrix_with_camera(&self, cam_eye: Vec3, cam_target: Vec3) -> glam::Mat4 {
+        let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
+        let view = glam::Mat4::look_at_rh(cam_eye, cam_target, Vec3::Y);
+        let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.1, self.fov_distance);
+        proj * view
+    }
+
+    /// Temporarily set camera for rendering (doesn't affect main camera state)
+    pub fn set_render_camera(&mut self, cam_eye: Vec3, cam_target: Vec3) {
+        let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
+        let view = glam::Mat4::look_at_rh(cam_eye, cam_target, Vec3::Y);
+        let proj = glam::Mat4::perspective_rh(self.fov_radians, aspect, 0.1, self.fov_distance);
+        let vp = proj * view;
+
+        // Update frustum for culling
+        self.frustum = math_util::Frustum::from_matrix(vp);
+
+        let ubo = CameraUBO {
+            vp: vp.to_cols_array_2d(),
+        };
+        self.queue
+            .write_buffer(&self.cam_buf, 0, bytemuck::bytes_of(&ubo));
+    }
+
+    /// Update camera to use main camera (public wrapper for write_camera)
+    pub fn update_main_camera(&mut self) {
+        self.write_camera();
+    }
+
     pub(crate) fn write_camera(&mut self) {
         let aspect = (self.config.width.max(1) as f32) / (self.config.height.max(1) as f32);
         let view = glam::Mat4::look_at_rh(self.cam_eye, self.cam_target, Vec3::Y);
