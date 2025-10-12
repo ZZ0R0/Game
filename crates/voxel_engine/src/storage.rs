@@ -118,6 +118,7 @@ impl MeshPool {
             mesh.positions.clear();
             mesh.uvs.clear();
             mesh.indices.clear();
+            mesh.ao.clear();
             self.stats.reuses += 1;
             self.update_stats();
             mesh
@@ -128,6 +129,7 @@ impl MeshPool {
                 positions: Vec::new(),
                 uvs: Vec::new(),
                 indices: Vec::new(),
+                ao: Vec::new(),
             }
         }
     }
@@ -154,6 +156,7 @@ impl MeshPool {
                 positions: Vec::with_capacity(capacity),
                 uvs: Vec::with_capacity(capacity),
                 indices: Vec::with_capacity(capacity),
+                ao: Vec::with_capacity(capacity),
             };
             self.available.push_back(mesh);
         }

@@ -247,8 +247,8 @@ impl App {
             config.camera.move_speed
         );
 
-        // Create meshing configuration from settings
-        let meshing_config = MeshingConfig::new();
+        // Create meshing configuration from settings (use greedy meshing by default)
+        let meshing_config = MeshingConfig::new(true);
 
         // Create job queue with meshing config and start workers
         let terrain_generator = TerrainGenerator::default();
@@ -429,15 +429,16 @@ impl App {
             // Track unloading in profiler
             self.profiler.chunks_unloaded = unloaded_count;
 
-            // Sort chunks by distance from player (Manhattan distance for speed)
+            // Sort chunks by distance from player position (actual 3D distance for better prioritization)
             if !to_load.is_empty() {
-                let camera_chunk = voxel_engine::world_to_chunk(cam_pos);
                 let mut sorted_chunks: Vec<IVec3> = to_load.into_iter().collect();
 
-                // Sort by Manhattan distance (closest first)
-                sorted_chunks.sort_by_key(|&chunk_pos| {
-                    let delta = chunk_pos - camera_chunk;
-                    delta.x.abs() + delta.y.abs() + delta.z.abs()
+                // Sort by actual distance to player position (closest first)
+                // Using squared distance for performance (avoids sqrt)
+                sorted_chunks.sort_by(|&a, &b| {
+                    let dist_a = voxel_engine::distance_to_chunk_squared(cam_pos, a);
+                    let dist_b = voxel_engine::distance_to_chunk_squared(cam_pos, b);
+                    dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
                 });
 
                 // Submit as batch job for parallel generation
@@ -624,7 +625,7 @@ impl App {
             for chunk_pos in &dirty_chunks {
                 if let Some(chunk) = self.chunk_manager.get_chunk(*chunk_pos) {
                     // Use meshing algorithm based on config setting (following strategy pattern)
-                    let meshing_config = MeshingConfig::new();
+                    let meshing_config = MeshingConfig::new(true);
                     let mesh = meshing_config.mesh_chunk(
                         chunk,
                         Some(&self.chunk_manager),

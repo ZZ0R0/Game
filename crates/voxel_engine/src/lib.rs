@@ -35,7 +35,7 @@ pub use atlas::{AtlasRect, FaceDir, TextureAtlas};
 
 pub use raycast::{raycast_dda, RaycastHit};
 
-pub use chunk_ring::{chunk_to_world, world_to_chunk, ChunkRing, ChunkRingConfig};
+pub use chunk_ring::{chunk_to_world, world_to_chunk, distance_to_chunk, distance_to_chunk_squared, ChunkRing, ChunkRingConfig};
 pub use generator::{Biome, TerrainConfig, TerrainGenerator};
 pub use job_queue::{ChunkJob, JobQueue, JobResult, JobWorker, WorkerHandle};
 pub use meshing_config::MeshingConfig;

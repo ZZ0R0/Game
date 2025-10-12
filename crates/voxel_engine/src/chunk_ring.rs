@@ -68,9 +68,10 @@ impl ChunkRing {
 
         self.current_chunk = chunk_pos;
 
-        // Calculate desired chunks (all chunks within generation radius)
-        self.desired_chunks =
-            self.calculate_chunks_in_radius(chunk_pos, self.config.generation_radius);
+        // Calculate desired chunks using world-based distance for more precision
+        const CHUNK_SIZE: f32 = 32.0;
+        let generation_radius_world = self.config.generation_radius as f32 * CHUNK_SIZE;
+        self.desired_chunks = self.calculate_chunks_in_world_radius(camera_pos, generation_radius_world);
 
         // Find chunks to load (desired but not loaded)
         let chunks_to_load: Vec<IVec3> = self
@@ -80,7 +81,8 @@ impl ChunkRing {
             .collect();
 
         // Find chunks to unload (loaded but beyond unload radius)
-        let unload_set = self.calculate_chunks_in_radius(chunk_pos, self.config.unload_radius);
+        let unload_radius_world = self.config.unload_radius as f32 * CHUNK_SIZE;
+        let unload_set = self.calculate_chunks_in_world_radius(camera_pos, unload_radius_world);
         let chunks_to_unload: Vec<IVec3> = self
             .loaded_chunks
             .difference(&unload_set)
@@ -144,6 +146,35 @@ impl ChunkRing {
         chunks
     }
 
+    /// Calculate all chunks within a world distance from player position
+    /// This is more accurate than chunk-based radius for edge cases
+    fn calculate_chunks_in_world_radius(&self, player_pos: Vec3, world_radius: f32) -> HashSet<IVec3> {
+        let mut chunks = HashSet::new();
+        
+        // Convert world radius to chunk radius (with some margin)
+        const CHUNK_SIZE: f32 = 32.0;
+        let chunk_radius = ((world_radius / CHUNK_SIZE).ceil() as i32) + 1;
+        let center_chunk = world_to_chunk(player_pos);
+        
+        let world_radius_sq = world_radius * world_radius;
+
+        // Iterate over potential chunk area
+        for x in (center_chunk.x - chunk_radius)..=(center_chunk.x + chunk_radius) {
+            for y in (center_chunk.y - chunk_radius)..=(center_chunk.y + chunk_radius) {
+                for z in (center_chunk.z - chunk_radius)..=(center_chunk.z + chunk_radius) {
+                    let chunk_pos = IVec3::new(x, y, z);
+                    
+                    // Check actual distance from player to chunk center
+                    if distance_to_chunk_squared(player_pos, chunk_pos) <= world_radius_sq {
+                        chunks.insert(chunk_pos);
+                    }
+                }
+            }
+        }
+
+        chunks
+    }
+
     /// Get current camera chunk position
     pub fn current_chunk(&self) -> IVec3 {
         self.current_chunk
@@ -184,4 +215,16 @@ pub fn chunk_to_world(chunk_pos: IVec3) -> Vec3 {
         chunk_pos.y as f32 * CHUNK_SIZE + CHUNK_SIZE / 2.0,
         chunk_pos.z as f32 * CHUNK_SIZE + CHUNK_SIZE / 2.0,
     )
+}
+
+/// Calculate distance from player position to chunk center
+pub fn distance_to_chunk(player_pos: Vec3, chunk_pos: IVec3) -> f32 {
+    let chunk_center = chunk_to_world(chunk_pos);
+    (player_pos - chunk_center).length()
+}
+
+/// Calculate squared distance from player position to chunk center (faster for comparisons)
+pub fn distance_to_chunk_squared(player_pos: Vec3, chunk_pos: IVec3) -> f32 {
+    let chunk_center = chunk_to_world(chunk_pos);
+    (player_pos - chunk_center).length_squared()
 }
