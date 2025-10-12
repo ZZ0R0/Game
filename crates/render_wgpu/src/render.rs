@@ -11,7 +11,6 @@ impl<'w> Gfx<'w> {
         window: &Window,
         fg: &FrameGraph,
         voxel_mesh: Option<&crate::mesh_upload::MeshBuffers>,
-        debug_culling: bool,
     ) -> Result<(), crate::wgpu::SurfaceError> {
         self.try_hot_reload();
 
@@ -58,40 +57,6 @@ impl<'w> Gfx<'w> {
                         ui.label(format!("Drawcalls: {}", stats.draw_calls));
                         ui.separator();
                         ui.label(format!("Culled: {}", stats.culled_chunks));
-                        
-                        // Enhanced occlusion culling debug info when H is pressed
-                        if debug_culling {
-                            ui.separator();
-                            ui.colored_label(
-                                egui::Color32::from_rgb(100, 220, 100),
-                                "🔍 OCCLUSION DEBUG"
-                            );
-                            ui.separator();
-                            
-                            // Frustum culling stats
-                            let total = stats.total_chunks;
-                            if total > 0 {
-                                let frustum_cull_rate = (stats.culled_chunks as f32 / total as f32) * 100.0;
-                                ui.label(format!("Frustum cull: {:.1}%", frustum_cull_rate));
-                            }
-                            
-                            // Occlusion culling stats
-                            ui.separator();
-                            ui.label(format!("Occlusion tested: {}", stats.occlusion_tested));
-                            ui.separator();
-                            ui.label(format!("Occlusion culled: {}", stats.occlusion_culled));
-                            ui.separator();
-                            ui.label(format!("Occlusion rate: {:.1}%", stats.occlusion_rate * 100.0));
-                            ui.separator();
-                            ui.label(format!("FOV: {:.1}°", self.fov_radians.to_degrees()));
-                            
-                        } else {
-                            ui.separator();
-                            ui.colored_label(
-                                egui::Color32::from_rgb(150, 150, 150),
-                                "Press H for occlusion debug"
-                            );
-                        }
 
                         // Chunk generation performance
                         if let (Some(gen_ms), Some(mesh_ms)) =
