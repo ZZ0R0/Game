@@ -269,8 +269,14 @@ impl JobQueue {
                     let atlas = crate::atlas::TextureAtlas::new_16x16();
                     let meshing_config = Arc::clone(&self.meshing_config);
                     let result = catch_unwind(AssertUnwindSafe(move || {
-                        // Use configured meshing strategy for parallel meshing
-                        meshing_config.mesh_chunks_parallel(&chunks, &temp_manager, &atlas)
+                        // Simple sequential meshing (replaced parallel meshing)
+                        chunks
+                            .iter()
+                            .map(|(position, chunk)| {
+                                let mesh = meshing_config.mesh_chunk(chunk, Some(&temp_manager), &atlas);
+                                (*position, mesh)
+                            })
+                            .collect::<Vec<_>>()
                     }));
                     let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
 

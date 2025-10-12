@@ -516,6 +516,10 @@ impl<'w> Gfx<'w> {
             wireframe_pipeline,
             chunk_renderer: crate::chunk_renderer::ChunkRenderer::new(32.0),
         };
+        
+        // Initialize occlusion culling system
+        gfx.chunk_renderer.init_occlusion_culling(&gfx.device, crate::wgpu::TextureFormat::Depth24Plus);
+        
         gfx.write_camera();
         gfx.write_object();
         gfx.write_wireframe();

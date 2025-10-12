@@ -12,6 +12,7 @@ pub mod chunk_renderer; // per-chunk rendering system
 pub mod frustum; // frustum culling for chunks
 pub mod gfx; // Gfx struct + core types
 pub mod mesh_upload; // upload vertex/index buffers // camera FOV and movement
+pub mod occlusion_culler; // hardware occlusion culling
 
 mod hot_reload; // shader hot-reload on file changes
 mod pipeline; // shader + pipeline creation helpers

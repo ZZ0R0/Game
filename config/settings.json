@@ -1,8 +1,8 @@
 {
   "graphics": {
-    "window_width": 1920,
-    "window_height": 1080,
-    "fullscreen": true,
+    "window_width": 800,
+    "window_height": 600,
+    "fullscreen": false,
     "vsync": false,
     "fov_degrees": 90.0,
     "render_distance": 320.0
@@ -24,7 +24,6 @@
   "performance": {
     "target_fps": 60,
     "frustum_culling": true,
-    "greedy_meshing": true,
     "log_level": "Summary"
   }
 }

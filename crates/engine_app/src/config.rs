@@ -98,9 +98,6 @@ pub struct PerformanceConfig {
     /// Enable frustum culling for chunks
     pub frustum_culling: bool,
 
-    /// Enable greedy meshing optimization
-    pub greedy_meshing: bool,
-
     /// Logging verbosity level
     #[serde(default)]
     pub log_level: LogLevel,
@@ -131,7 +128,6 @@ impl Default for GameConfig {
             performance: PerformanceConfig {
                 target_fps: 60,
                 frustum_culling: true,
-                greedy_meshing: true,
                 log_level: LogLevel::Summary,
             },
         }

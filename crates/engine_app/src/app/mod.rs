@@ -210,6 +210,9 @@ pub struct App {
 
     // Spectator camera system
     spectator_camera: SpectatorCamera,
+
+    // Debug options
+    debug_occlusion: bool,
 }
 
 impl App {
@@ -240,20 +243,12 @@ impl App {
             config.world.worker_threads
         );
         println!(
-            "   • Greedy meshing: {}",
-            if config.performance.greedy_meshing {
-                "enabled"
-            } else {
-                "disabled (legacy)"
-            }
-        );
-        println!(
             "   • Camera speed: {:.1} blocks/s",
             config.camera.move_speed
         );
 
         // Create meshing configuration from settings
-        let meshing_config = MeshingConfig::new(config.performance.greedy_meshing);
+        let meshing_config = MeshingConfig::new();
 
         // Create job queue with meshing config and start workers
         let terrain_generator = TerrainGenerator::default();
@@ -316,6 +311,7 @@ impl App {
             control_mode: ControlMode::UI, // Start in UI mode
             fullscreen: false,
             spectator_camera: SpectatorCamera::new(),
+            debug_occlusion: false,
         }
     }
 
@@ -628,7 +624,7 @@ impl App {
             for chunk_pos in &dirty_chunks {
                 if let Some(chunk) = self.chunk_manager.get_chunk(*chunk_pos) {
                     // Use meshing algorithm based on config setting (following strategy pattern)
-                    let meshing_config = MeshingConfig::new(self.config.performance.greedy_meshing);
+                    let meshing_config = MeshingConfig::new();
                     let mesh = meshing_config.mesh_chunk(
                         chunk,
                         Some(&self.chunk_manager),
@@ -810,6 +806,29 @@ impl ApplicationHandler for App {
                                 // F11 toggles fullscreen
                                 self.toggle_fullscreen();
                             }
+                            KeyCode::KeyH => {
+                                // H toggles occlusion culling debug display
+                                self.debug_occlusion = !self.debug_occlusion;
+                                
+                                if self.debug_occlusion {
+                                    println!("🔍 === OCCLUSION CULLING DEBUG ENABLED ===");
+                                    if let Some(gfx) = &self.gfx {
+                                        let stats = &gfx.chunk_renderer.stats;
+                                        println!("📊 Culling Stats:");
+                                        println!("   Total chunks: {}", stats.total_chunks);
+                                        println!("   Frustum visible: {}", stats.visible_chunks);
+                                        println!("   Frustum culled: {}", stats.culled_chunks);
+                                        println!("   Occlusion tested: {}", stats.occlusion_tested);
+                                        println!("   Occlusion culled: {}", stats.occlusion_culled);
+                                        println!("   Occlusion rate: {:.1}%", stats.occlusion_rate * 100.0);
+                                        println!("   Camera Pos: ({:.1}, {:.1}, {:.1})", 
+                                            gfx.cam_eye.x, gfx.cam_eye.y, gfx.cam_eye.z);
+                                    }
+                                    println!("💡 Occlusion culling automatically hides chunks behind others!");
+                                } else {
+                                    println!("🔍 Occlusion debug disabled");
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -877,7 +896,7 @@ impl ApplicationHandler for App {
                         g.update_main_camera();
                     }
 
-                    if let Err(e) = g.render_with(w, &self.fg, self.voxel_mesh.as_ref()) {
+                    if let Err(e) = g.render_with(w, &self.fg, self.voxel_mesh.as_ref(), self.debug_occlusion) {
                         match e {
                             wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated => {
                                 let sz = g.size();

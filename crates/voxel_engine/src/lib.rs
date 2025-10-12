@@ -28,8 +28,7 @@ pub use chunk::{
 };
 
 pub use meshing::{
-    greedy_mesh_chunk, greedy_mesh_chunk_separated, mesh_chunk_v2 as mesh_chunk,
-    mesh_chunk_with_ao, MeshData, MeshPosUv, SeparatedMesh,
+    mesh_chunk_v2 as mesh_chunk, mesh_chunk_with_ao, MeshData, MeshPosUv,
 };
 
 pub use atlas::{AtlasRect, FaceDir, TextureAtlas};

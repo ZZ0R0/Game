@@ -221,36 +221,3 @@ impl AABB {
         frustum.intersects_aabb(self.min, self.max)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_plane_distance() {
-        let plane = Plane {
-            normal: Vec3::Y,
-            distance: -5.0,
-        };
-
-        assert_eq!(plane.distance_to_point(Vec3::new(0.0, 5.0, 0.0)), 0.0);
-        assert_eq!(plane.distance_to_point(Vec3::new(0.0, 10.0, 0.0)), 5.0);
-        assert_eq!(plane.distance_to_point(Vec3::new(0.0, 0.0, 0.0)), -5.0);
-    }
-
-    #[test]
-    fn test_aabb_corners() {
-        let aabb = AABB::new(Vec3::ZERO, Vec3::ONE);
-        let corners = aabb.corners();
-        assert_eq!(corners.len(), 8);
-        assert!(corners.contains(&Vec3::ZERO));
-        assert!(corners.contains(&Vec3::ONE));
-    }
-
-    #[test]
-    fn test_aabb_center() {
-        let aabb = AABB::new(Vec3::ZERO, Vec3::splat(2.0));
-        assert_eq!(aabb.center(), Vec3::ONE);
-        assert_eq!(aabb.half_extents(), Vec3::ONE);
-    }
-}

@@ -2,8 +2,9 @@
 
 use crate::buffer_pool::BufferPool;
 use crate::frustum::{Frustum, AABB};
+use crate::occlusion_culler::OcclusionCuller;
 use crate::wgpu;
-use glam::{IVec3, Mat4};
+use glam::{IVec3, Mat4, Vec3};
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
@@ -84,6 +85,9 @@ pub struct ChunkRenderer {
 
     /// Statistics
     pub stats: RenderStats,
+
+    /// Hardware occlusion culling system
+    pub occlusion_culler: Option<OcclusionCuller>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -91,7 +95,7 @@ pub struct RenderStats {
     /// Total chunks loaded
     pub total_chunks: usize,
 
-    /// Chunks visible this frame (after culling)
+    /// Chunks visible this frame (after frustum culling)
     pub visible_chunks: usize,
 
     /// Total triangles in all chunks
@@ -103,8 +107,17 @@ pub struct RenderStats {
     /// Draw calls this frame
     pub draw_calls: u32,
 
-    /// Culled chunks this frame
+    /// Chunks culled by frustum this frame
     pub culled_chunks: usize,
+
+    /// Chunks tested for occlusion
+    pub occlusion_tested: usize,
+
+    /// Chunks occluded (hidden behind other geometry)
+    pub occlusion_culled: usize,
+
+    /// Occlusion culling rate (0.0 to 1.0)
+    pub occlusion_rate: f32,
 }
 
 impl ChunkRenderer {
@@ -114,7 +127,13 @@ impl ChunkRenderer {
             buffer_pool: BufferPool::new(256),
             chunk_size,
             stats: RenderStats::default(),
+            occlusion_culler: None, // Will be initialized when device is available
         }
+    }
+
+    /// Initialize occlusion culling system
+    pub fn init_occlusion_culling(&mut self, device: &wgpu::Device, depth_format: wgpu::TextureFormat) {
+        self.occlusion_culler = Some(OcclusionCuller::new(device, depth_format, 512));
     }
 
     /// Add or update a chunk mesh
@@ -143,29 +162,60 @@ impl ChunkRenderer {
         }
     }
 
-    /// Perform frustum culling and return visible chunk positions
-    pub fn cull_chunks(&mut self, vp_matrix: Mat4) -> Vec<IVec3> {
+    /// Perform frustum culling and occlusion culling, return visible chunk positions
+    pub fn cull_chunks(&mut self, vp_matrix: Mat4, camera_pos: Vec3) -> Vec<IVec3> {
+        // First pass: Frustum culling
         let frustum = Frustum::from_matrix(vp_matrix);
+        let mut frustum_visible = Vec::new();
+        let mut frustum_culled = 0usize;
 
-        let mut visible = Vec::new();
+        // Collect chunks that pass frustum culling
+        let frustum_candidates: Vec<_> = self.meshes.iter()
+            .filter_map(|(pos, mesh)| {
+                if frustum.test_aabb(&mesh.aabb) {
+                    frustum_visible.push(*pos);
+                    Some((*pos, mesh))
+                } else {
+                    frustum_culled += 1;
+                    None
+                }
+            })
+            .collect();
+
+        // Second pass: Occlusion culling (if enabled)
+        let final_visible = if let Some(ref mut occlusion_culler) = self.occlusion_culler {
+            let occlusion_visible = occlusion_culler.cull_chunks(&frustum_candidates, camera_pos, vp_matrix);
+            
+            // Update occlusion stats
+            let occlusion_stats = &occlusion_culler.stats;
+            self.stats.occlusion_tested = occlusion_stats.tested_chunks;
+            self.stats.occlusion_culled = occlusion_stats.occluded_chunks;
+            self.stats.occlusion_rate = occlusion_stats.occlusion_rate;
+            
+            occlusion_visible
+        } else {
+            // No occlusion culling - return all frustum-visible chunks
+            self.stats.occlusion_tested = 0;
+            self.stats.occlusion_culled = 0;
+            self.stats.occlusion_rate = 0.0;
+            frustum_visible
+        };
+
+        // Calculate rendering stats
         let mut rendered_triangles = 0u32;
-        let mut culled = 0usize;
-
-        for (pos, mesh) in &self.meshes {
-            if frustum.test_aabb(&mesh.aabb) {
-                visible.push(*pos);
+        for pos in &final_visible {
+            if let Some(mesh) = self.meshes.get(pos) {
                 rendered_triangles += mesh.triangle_count;
-            } else {
-                culled += 1;
             }
         }
 
-        self.stats.visible_chunks = visible.len();
-        self.stats.culled_chunks = culled;
+        // Update stats
+        self.stats.visible_chunks = final_visible.len();
+        self.stats.culled_chunks = frustum_culled;
         self.stats.rendered_triangles = rendered_triangles;
-        self.stats.draw_calls = visible.len() as u32;
+        self.stats.draw_calls = final_visible.len() as u32;
 
-        visible
+        final_visible
     }
 
     /// Clear all meshes
