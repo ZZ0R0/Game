@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+//! Occlusion culling module
+
 //! Hardware occlusion culling system using GPU queries
 //! Tests chunk visibility by rendering bounding boxes and counting visible pixels
 
