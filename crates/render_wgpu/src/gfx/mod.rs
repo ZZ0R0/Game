@@ -4,7 +4,7 @@ use std::{path::PathBuf, time::SystemTime};
 
 use crate::winit::{dpi::PhysicalSize, window::Window};
 use bytemuck::{Pod, Zeroable};
-use egui::{Context as EguiCtx, ViewportId};
+use egui::{Context as EguiCtx, ViewportId, Color32, Pos2};
 use egui_wgpu::Renderer as EguiRenderer;
 use egui_winit::State as EguiWinit;
 use glam::{Mat4, Vec3};
@@ -82,6 +82,10 @@ pub struct Gfx<'w> {
 
     // chunk rendering
     pub chunk_renderer: crate::chunk_renderer::ChunkRenderer,
+
+    // Custom text overlays
+    pub(crate) overlay_texts: Vec<OverlayText>,
+    pub(crate) show_debug_overlay: bool,
 }
 
 #[derive(Clone)]
@@ -89,6 +93,41 @@ pub(crate) struct HotReload {
     pub(crate) path: PathBuf,
     pub(crate) mtime: SystemTime,
     pub(crate) last_error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OverlayText {
+    pub text: String,
+    pub position: OverlayPosition,
+    pub color: Color32,
+    pub font_size: f32,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum OverlayPosition {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+    Custom(Pos2), // Absolute screen position
+}
+
+impl Default for OverlayText {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            position: OverlayPosition::TopLeft,
+            color: Color32::WHITE,
+            font_size: 14.0,
+            visible: true,
+        }
+    }
 }
 
 #[repr(C)]
@@ -515,6 +554,8 @@ impl<'w> Gfx<'w> {
             wireframe_layout,
             wireframe_pipeline,
             chunk_renderer: crate::chunk_renderer::ChunkRenderer::new(32.0),
+            overlay_texts: Vec::new(),
+            show_debug_overlay: true,
         };
         
         // Initialize occlusion culling system
@@ -524,5 +565,78 @@ impl<'w> Gfx<'w> {
         gfx.write_object();
         gfx.write_wireframe();
         gfx
+    }
+
+    // === Text Overlay Methods ===
+
+    /// Add a text overlay at the specified position
+    pub fn add_overlay_text(&mut self, text: String, position: OverlayPosition) -> usize {
+        let overlay = OverlayText {
+            text,
+            position,
+            ..Default::default()
+        };
+        self.overlay_texts.push(overlay);
+        self.overlay_texts.len() - 1
+    }
+
+    /// Add a text overlay with custom styling
+    pub fn add_styled_overlay_text(
+        &mut self,
+        text: String,
+        position: OverlayPosition,
+        color: Color32,
+        font_size: f32,
+    ) -> usize {
+        let overlay = OverlayText {
+            text,
+            position,
+            color,
+            font_size,
+            visible: true,
+        };
+        self.overlay_texts.push(overlay);
+        self.overlay_texts.len() - 1
+    }
+
+    /// Update the text content of an overlay by index
+    pub fn update_overlay_text(&mut self, index: usize, text: String) {
+        if let Some(overlay) = self.overlay_texts.get_mut(index) {
+            overlay.text = text;
+        }
+    }
+
+    /// Set the visibility of an overlay by index
+    pub fn set_overlay_visibility(&mut self, index: usize, visible: bool) {
+        if let Some(overlay) = self.overlay_texts.get_mut(index) {
+            overlay.visible = visible;
+        }
+    }
+
+    /// Clear all overlay texts
+    pub fn clear_overlay_texts(&mut self) {
+        self.overlay_texts.clear();
+    }
+
+    /// Set whether to show the debug overlay (FPS, stats, etc.)
+    pub fn set_debug_overlay_visible(&mut self, visible: bool) {
+        self.show_debug_overlay = visible;
+    }
+
+    /// Toggle the debug overlay visibility
+    pub fn toggle_debug_overlay(&mut self) {
+        self.show_debug_overlay = !self.show_debug_overlay;
+    }
+
+    /// Remove an overlay by index
+    pub fn remove_overlay_text(&mut self, index: usize) {
+        if index < self.overlay_texts.len() {
+            self.overlay_texts.remove(index);
+        }
+    }
+
+    /// Get the number of active overlay texts
+    pub fn overlay_count(&self) -> usize {
+        self.overlay_texts.len()
     }
 }

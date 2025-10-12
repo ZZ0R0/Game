@@ -6,12 +6,13 @@ use engine_core::Engine;
 use glam::{IVec3, Mat4};
 use render_wgpu::gfx::Gfx;
 use render_wgpu::winit as rwinit;
-use render_wgpu::{wgpu, FrameGraph};
+use render_wgpu::{wgpu, FrameGraph, OverlayPosition};
+use render_wgpu::egui::Color32;
 
 use render_wgpu::mesh_upload::MeshBuffers;
 use voxel_engine::{
-    ChunkJob, ChunkManager, ChunkPool, ChunkRing, ChunkRingConfig, JobQueue, JobResult, JobWorker,
-    MeshPool, MeshingConfig, TerrainGenerator, TextureAtlas, WorkerHandle, AIR, STONE,
+    ChunkJob, ChunkManager, ChunkPool, ChunkRing, ChunkRingConfig, JobQueue, JobResult,
+    MeshPool, MeshingConfig, TerrainGenerator, TextureAtlas, AIR, STONE,
 };
 
 use rwinit::{
@@ -27,6 +28,9 @@ use crate::spectator_camera::SpectatorCamera;
 
 mod state;
 use state::Input;
+
+mod performance_monitor;
+use performance_monitor::PerformanceMonitor;
 
 /// Frame profiler for tracking performance of major systems
 #[derive(Debug, Clone)]
@@ -161,8 +165,8 @@ impl FrameProfiler {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlMode {
-    Game, // FPS mode: cursor locked, camera rotation
-    UI,   // UI mode: cursor visible, can interact with menus
+    Game,
+    UI,
 }
 
 pub struct App {
@@ -197,12 +201,13 @@ pub struct App {
     terrain_generator: TerrainGenerator,
     chunk_pool: ChunkPool,
     mesh_pool: MeshPool,
-    worker_handle: Option<WorkerHandle>,
     voxel_mesh: Option<MeshBuffers>,
     texture_atlas: TextureAtlas,
 
     // Performance profiling
     profiler: FrameProfiler,
+    performance_monitor: PerformanceMonitor, // NOUVEAU
+    perf_overlay: Option<usize>, // Index de l'overlay de performance
 
     // Control mode
     control_mode: ControlMode,
@@ -210,6 +215,11 @@ pub struct App {
 
     // Spectator camera system
     spectator_camera: SpectatorCamera,
+
+    // Custom text overlays (store overlay indices)
+    welcome_text_overlay: Option<usize>,
+    position_overlay: Option<usize>,
+    custom_message_overlay: Option<usize>,
 }
 
 impl App {
@@ -223,8 +233,9 @@ impl App {
 
         // Configure rayon's global threadpool based on worker_threads setting
         // This affects all parallel operations (meshing, generation, etc.)
+        let worker_threads = config.world.worker_threads;
         rayon::ThreadPoolBuilder::new()
-            .num_threads(config.world.worker_threads)
+            .num_threads(worker_threads)
             .thread_name(|i| format!("voxel-worker-{}", i))
             .build_global()
             .expect("Failed to initialize rayon threadpool");
@@ -247,11 +258,9 @@ impl App {
         // Create meshing configuration from settings (use greedy meshing by default)
         let meshing_config = MeshingConfig::new(true);
 
-        // Create job queue with meshing config and start workers
+        // Create job queue with meshing config (no more workers!)
         let terrain_generator = TerrainGenerator::default();
         let job_queue = Arc::new(JobQueue::with_config(terrain_generator, meshing_config));
-        let worker = JobWorker::new(Arc::clone(&job_queue), config.world.worker_threads);
-        let worker_handle = worker.start();
 
         // Configure chunk ring based on render distance from config
         let view_radius = config.calculate_view_radius();
@@ -301,13 +310,17 @@ impl App {
             terrain_generator: TerrainGenerator::default(),
             chunk_pool: ChunkPool::new(512),
             mesh_pool: MeshPool::new(512),
-            worker_handle: Some(worker_handle),
             voxel_mesh: None,
             texture_atlas: TextureAtlas::new_16x16(),
             profiler: FrameProfiler::new(),
+            performance_monitor: PerformanceMonitor::new(worker_threads), // NOUVEAU
+            perf_overlay: None, // NOUVEAU
             control_mode: ControlMode::UI, // Start in UI mode
             fullscreen: false,
             spectator_camera: SpectatorCamera::new(),
+            welcome_text_overlay: None,
+            position_overlay: None,
+            custom_message_overlay: None,
         }
     }
 
@@ -397,6 +410,47 @@ impl Default for App {
 }
 
 impl App {
+    /// Setup example text overlays to demonstrate the system
+    fn setup_overlays(&mut self) {
+        if let Some(g) = self.gfx.as_mut() {
+            // Position display in bottom left
+            self.position_overlay = Some(g.add_styled_overlay_text(
+                "".to_string(),
+                OverlayPosition::BottomLeft,
+                Color32::WHITE,
+                16.0,
+            ));
+
+            // Performance monitor in top right (NOUVEAU)
+            self.perf_overlay = Some(g.add_styled_overlay_text(
+                "".to_string(),
+                OverlayPosition::TopRight,
+                Color32::LIGHT_GREEN,
+                14.0,
+            ));
+        }
+    }
+
+    /// Update overlay texts with current game state
+    fn update_overlays(&mut self) {
+        if let Some(g) = self.gfx.as_mut() {
+            // Update position overlay
+            if let Some(index) = self.position_overlay {
+                let pos_text = format!(
+                    "Position: ({:.1}, {:.1}, {:.1})\n", 
+                    g.cam_eye.x, g.cam_eye.y, g.cam_eye.z
+                );
+                g.update_overlay_text(index, pos_text);
+            }
+
+            // Update performance overlay (NOUVEAU)
+            if let Some(index) = self.perf_overlay {
+                let perf_text = self.performance_monitor.get_overlay_text();
+                g.update_overlay_text(index, perf_text);
+            }
+        }
+    }
+
     /// Update chunk loading based on camera position (NEW SYSTEM)
     fn update_chunk_loading(&mut self) {
         if let Some(g) = self.gfx.as_ref() {
@@ -447,19 +501,17 @@ impl App {
         }
     }
 
-    /// Process completed jobs from worker threads
+    /// Process completed jobs (now processed immediately via Rayon!)
     fn process_completed_jobs(&mut self) {
+        let job_start = Instant::now();
         let results = self.job_queue.drain_completed();
-
-        // FIX: Count jobs before consuming
-        let job_count = results.len();
 
         if results.is_empty() {
             return;
         }
 
         // Track this for profiling
-        self.profiler.jobs_completed = job_count;
+        self.profiler.jobs_completed = results.len();
 
         // Get frustum from render context for culling
         let frustum = self.gfx.as_ref().map(|g| g.frustum.clone());
@@ -467,10 +519,14 @@ impl App {
         // Collect chunks to mesh in a batch (with frustum culling)
         let mut chunks_to_mesh = Vec::new();
         let mut _culled_count = 0;
+        let mut generation_count = 0;
+        let mut meshing_count = 0;
 
         for result in &results {
             match result {
                 JobResult::Generated { position, chunk } => {
+                    generation_count += 1;
+                    
                     // Chunk generated, insert into manager
                     self.chunk_manager.insert(chunk.clone());
                     self.chunk_ring.mark_loaded(*position);
@@ -496,12 +552,14 @@ impl App {
                 }
 
                 JobResult::Meshed { position, mesh } => {
+                    meshing_count += 1;
                     // Mesh generated, upload to GPU
                     self.profiler.chunks_meshed += 1;
                     self.upload_chunk_mesh(*position, mesh.clone());
                 }
 
                 JobResult::MeshedBatch { meshes } => {
+                    meshing_count += meshes.len();
                     // Batch meshing completed, upload all meshes to GPU
                     self.profiler.chunks_meshed += meshes.len();
                     for (position, mesh) in meshes {
@@ -524,6 +582,19 @@ impl App {
             self.job_queue.push(ChunkJob::MeshBatch {
                 chunks: chunks_to_mesh,
             });
+        }
+
+        // Mesurer et enregistrer les temps (NOUVEAU)
+        let job_time_ms = job_start.elapsed().as_secs_f32() * 1000.0;
+        
+        // Pour l'instant, utilisons le temps de traitement comme approximation
+        // TODO: Obtenir les vrais temps de génération/meshing du job_queue
+        if generation_count > 0 {
+            self.performance_monitor.add_generation_time(job_time_ms * 0.6, generation_count);
+        }
+        
+        if meshing_count > 0 {
+            self.performance_monitor.add_meshing_time(job_time_ms * 0.4, meshing_count);
         }
     }
 
@@ -705,6 +776,9 @@ impl ApplicationHandler for App {
             self.window = Some(window_ref);
             self.gfx = Some(gfx);
 
+            // Setup example text overlays
+            self.setup_overlays();
+
             println!("=== GAME STARTED ===");
             println!("Worker threads: {}", self.config.world.worker_threads);
             println!(
@@ -803,6 +877,26 @@ impl ApplicationHandler for App {
                                 // F11 toggles fullscreen
                                 self.toggle_fullscreen();
                             }
+                            KeyCode::Tab => {
+                                // Tab toggles debug overlay
+                                if let Some(g) = self.gfx.as_mut() {
+                                    g.toggle_debug_overlay();
+                                }
+                            }
+                            KeyCode::KeyM => {
+                                // M toggle performance monitor overlay (NOUVEAU)
+                                if let Some(g) = self.gfx.as_mut() {
+                                    if let Some(index) = self.perf_overlay {
+                                        // Toggle visibility (assuming we need to track state)
+                                        static mut PERF_VISIBLE: bool = true;
+                                        unsafe {
+                                            PERF_VISIBLE = !PERF_VISIBLE;
+                                            g.set_overlay_visibility(index, PERF_VISIBLE);
+                                            println!("Performance monitor: {}", if PERF_VISIBLE { "ON" } else { "OFF" });
+                                        }
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -833,6 +927,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                // Update overlay texts with current state
+                self.update_overlays();
+
                 // Profile: Rendering
                 let render_start = Instant::now();
 
@@ -890,7 +987,11 @@ impl ApplicationHandler for App {
                     self.profiler.rendered_triangles = stats.rendered_triangles as usize;
                 }
 
-                self.profiler.rendering_ms = render_start.elapsed().as_secs_f32() * 1000.0;
+                let render_time_ms = render_start.elapsed().as_secs_f32() * 1000.0;
+                self.profiler.rendering_ms = render_time_ms;
+                
+                // Mettre à jour le moniteur de performance (NOUVEAU)
+                self.performance_monitor.add_frame_time(render_time_ms);
             }
             _ => {}
         }
@@ -970,6 +1071,21 @@ impl ApplicationHandler for App {
         // End frame profiling
         let total_frame_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
         self.profiler.end_frame(total_frame_ms);
+
+        // Mettre à jour les statistiques du moniteur (NOUVEAU)
+        let job_stats = self.job_queue.get_stats();
+        if let Some(g) = self.gfx.as_ref() {
+            let stats = &g.chunk_renderer.stats;
+            self.performance_monitor.update_render_stats(
+                self.chunk_ring.loaded_count(),
+                stats.visible_chunks,
+                stats.culled_chunks,
+                stats.draw_calls as usize,
+                job_stats.pending_count,
+            );
+        }
+        
+        self.performance_monitor.update_stats();
 
         if let Some(w) = self.window {
             w.request_redraw();

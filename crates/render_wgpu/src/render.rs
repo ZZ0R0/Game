@@ -1,8 +1,8 @@
 use crate::winit::window::Window;
-use egui::{RichText, TopBottomPanel};
+use egui::{RichText, TopBottomPanel, Window as EguiWindow, Align2, FontId};
 
 use crate::framegraph::Node;
-use crate::gfx::{Gfx, ScreenDescriptor};
+use crate::gfx::{Gfx, ScreenDescriptor, OverlayPosition};
 use crate::FrameGraph;
 
 impl<'w> Gfx<'w> {
@@ -17,7 +17,9 @@ impl<'w> Gfx<'w> {
         // egui begin
         let input = self.egui_state.take_egui_input(window);
         let full_output = self.egui_ctx.run(input, |ctx| {
-            TopBottomPanel::top("overlay").show(ctx, |ui| {
+            // Show debug overlay if enabled
+            if self.show_debug_overlay {
+                TopBottomPanel::top("overlay").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Dev Engine").strong());
                     ui.separator();
@@ -84,6 +86,137 @@ impl<'w> Gfx<'w> {
                     }
                 });
             });
+            }
+
+            // Render custom text overlays
+            for (index, overlay) in self.overlay_texts.iter().enumerate() {
+                if !overlay.visible {
+                    continue;
+                }
+
+                match &overlay.position {
+                    OverlayPosition::TopLeft => {
+                        EguiWindow::new(format!("overlay_tl_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::LEFT_TOP, [10.0, 10.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::TopCenter => {
+                        EguiWindow::new(format!("overlay_tc_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::CENTER_TOP, [0.0, 10.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::TopRight => {
+                        EguiWindow::new(format!("overlay_tr_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::RIGHT_TOP, [-10.0, 10.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::CenterLeft => {
+                        EguiWindow::new(format!("overlay_cl_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::LEFT_CENTER, [10.0, 0.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::Center => {
+                        EguiWindow::new(format!("overlay_c_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::CenterRight => {
+                        EguiWindow::new(format!("overlay_cr_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::RIGHT_CENTER, [-10.0, 0.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::BottomLeft => {
+                        EguiWindow::new(format!("overlay_bl_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::LEFT_BOTTOM, [10.0, -10.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::BottomCenter => {
+                        EguiWindow::new(format!("overlay_bc_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::CENTER_BOTTOM, [0.0, -10.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::BottomRight => {
+                        EguiWindow::new(format!("overlay_br_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .anchor(Align2::RIGHT_BOTTOM, [-10.0, -10.0])
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                    OverlayPosition::Custom(pos) => {
+                        EguiWindow::new(format!("overlay_custom_{}", index))
+                            .title_bar(false)
+                            .resizable(false)
+                            .collapsible(false)
+                            .fixed_pos(*pos)
+                            .show(ctx, |ui| {
+                                ui.label(RichText::new(&overlay.text)
+                                    .color(overlay.color)
+                                    .font(FontId::proportional(overlay.font_size)));
+                            });
+                    }
+                }
+            }
         });
         self.egui_state
             .handle_platform_output(window, full_output.platform_output);

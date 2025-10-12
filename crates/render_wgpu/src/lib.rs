@@ -2,6 +2,7 @@
 
 pub use egui_wgpu::wgpu;
 pub use egui_winit::winit;
+pub use egui;
 
 mod framegraph;
 pub use framegraph::FrameGraph;
@@ -11,6 +12,7 @@ pub mod camera_settings;
 pub mod chunk_renderer; // per-chunk rendering system
 pub mod frustum; // frustum culling for chunks
 pub mod gfx; // Gfx struct + core types
+pub use gfx::{OverlayText, OverlayPosition};
 pub mod mesh_upload; // upload vertex/index buffers // camera FOV and movement
 pub mod occlusion_culler; // hardware occlusion culling
 
