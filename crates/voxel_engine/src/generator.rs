@@ -2,9 +2,11 @@
 //!
 //! Uses noise functions to create varied terrain with hills, valleys, and features
 
-use crate::chunk::{BlockId, Chunk, AIR, CHUNK_SIZE, DIRT, GRASS, STONE, WATER};
+use crate::chunk::{BlockId, Chunk, AIR, CHUNK_SIZE, DIRT, GRASS, STONE};
+use crate::generator_metrics::{GenerationSample, GeneratorMetrics, measure_us};
 use glam::IVec3;
 use rayon::prelude::*;
+use std::time::Instant;
 
 /// Terrain generator configuration
 #[derive(Debug, Clone)]
@@ -38,52 +40,166 @@ impl Default for TerrainConfig {
 }
 
 /// Terrain generator
+#[derive(Clone)]
 pub struct TerrainGenerator {
     config: TerrainConfig,
+    metrics: Option<GeneratorMetrics>,
 }
 
 impl TerrainGenerator {
     pub fn new(config: TerrainConfig) -> Self {
-        Self { config }
+        Self { 
+            config,
+            metrics: None,
+        }
     }
 
-    /// Generate a chunk at the given position
-    pub fn generate_chunk(&self, position: IVec3) -> Chunk {
-        let mut chunk = Chunk::new(position);
+    /// Create a new generator with metrics enabled
+    pub fn with_metrics(config: TerrainConfig, max_samples: usize) -> Self {
+        Self {
+            config,
+            metrics: Some(GeneratorMetrics::new(max_samples)),
+        }
+    }
 
-        // Generate terrain for this chunk
+    /// Get access to metrics
+    pub fn metrics(&self) -> Option<&GeneratorMetrics> {
+        self.metrics.as_ref()
+    }
+
+    /// Generate a chunk at the given position with detailed timing
+    pub fn generate_chunk(&self, position: IVec3) -> Chunk {
+        let start_total = Instant::now();
+        
+        let underground_check_time_us;
+        let mut underground_fill_time_us = 0.0;
+        let height_calculation_time_us;
+        let block_placement_time_us;
+        let was_underground;
+
+        let mut chunk = Chunk::new(position);
+        
+        let chunk_y_start = position.y * CHUNK_SIZE as i32;
+        let chunk_y_end = chunk_y_start + CHUNK_SIZE as i32;
+
+        // 🚀 SUPER OPTIMISATION: Chunk entièrement souterrain = remplir de STONE directement
+        let chunk_above_y = chunk_y_end;
+        
+        // Échantillonner quelques points pour voir si tout le chunk est souterrain
+        let sample_points = [
+            (0, 0), (CHUNK_SIZE-1, 0), (0, CHUNK_SIZE-1), (CHUNK_SIZE-1, CHUNK_SIZE-1), 
+            (CHUNK_SIZE/2, CHUNK_SIZE/2)
+        ];
+        
+        // TIMING: Underground check
+        let (is_fully_underground, check_time) = measure_us(|| {
+            sample_points.iter().all(|&(lx, lz)| {
+                let world_x = position.x * CHUNK_SIZE as i32 + lx as i32;
+                let world_z = position.z * CHUNK_SIZE as i32 + lz as i32;
+                let height = self.calculate_height(world_x, world_z);
+                chunk_above_y <= height
+            })
+        });
+        underground_check_time_us = check_time;
+
+        if is_fully_underground {
+            // TIMING: Underground fill
+            let (_, fill_time) = measure_us(|| {
+                for local_z in 0..CHUNK_SIZE {
+                    for local_y in 0..CHUNK_SIZE {
+                        for local_x in 0..CHUNK_SIZE {
+                            chunk.set(local_x, local_y, local_z, STONE);
+                        }
+                    }
+                }
+            });
+            underground_fill_time_us = fill_time;
+
+            // Record metrics
+            if let Some(metrics) = &self.metrics {
+                let total_time_us = start_total.elapsed().as_micros() as f32;
+                metrics.add_sample(GenerationSample {
+                    underground_check_time_us,
+                    underground_fill_time_us,
+                    height_calculation_time_us: 0.0,
+                    block_placement_time_us: 0.0,
+                    total_time_us,
+                    was_underground: true,
+                    timestamp: Instant::now(),
+                });
+            }
+
+            return chunk;
+        }
+
+        // Surface chunk (not fully underground)
+        was_underground = false;
+
+        // ✅ ULTRA-OPTIMISÉ: Pas de height_map! Calcul à la volée (meilleur cache CPU)
+        // TIMING: Height calculation and block placement
+        let start_height_calc = Instant::now();
+        
         for local_z in 0..CHUNK_SIZE {
             for local_x in 0..CHUNK_SIZE {
-                // Convert to world coordinates
                 let world_x = position.x * CHUNK_SIZE as i32 + local_x as i32;
                 let world_z = position.z * CHUNK_SIZE as i32 + local_z as i32;
-
-                // Calculate height at this XZ position
                 let height = self.calculate_height(world_x, world_z);
 
-                // Fill column from bottom to height
+                // Early exit: colonne entièrement au-dessus du terrain (empty)
+                if chunk_y_start > height {
+                    continue;
+                }
+
+                // Pré-calculer si toute la colonne est solide
+                let all_solid = chunk_y_end <= height;
+
                 for local_y in 0..CHUNK_SIZE {
-                    let world_y = position.y * CHUNK_SIZE as i32 + local_y as i32;
+                    let world_y = chunk_y_start + local_y as i32;
+
+                    // Arrêt précoce: si on est au-dessus du terrain
+                    if !all_solid && world_y > height {
+                        break; // Reste de la colonne = empty (défaut du chunk)
+                    }
 
                     let block = if world_y < height {
-                        // Underground
-                        if world_y < height - 4 {
-                            STONE
-                        } else if world_y < height - 1 {
-                            DIRT
-                        } else {
-                            GRASS
+                        // Calcul de profondeur optimisé
+                        let depth = height - world_y;
+                        if depth > 4 { 
+                            STONE 
+                        } else if depth > 1 { 
+                            DIRT 
+                        } else { 
+                            GRASS 
                         }
-                    } else if world_y <= self.config.water_level {
-                        // Water
-                        WATER
                     } else {
-                        AIR
+                        AIR // Empty
                     };
 
-                    chunk.set(local_x, local_y, local_z, block);
+                    if block != AIR {
+                        chunk.set(local_x, local_y, local_z, block);
+                    }
                 }
             }
+        }
+
+        let height_and_block_time = start_height_calc.elapsed().as_micros() as f32;
+        
+        // Split timing between height calculation and block placement (approximate 50/50)
+        height_calculation_time_us = height_and_block_time * 0.5;
+        block_placement_time_us = height_and_block_time * 0.5;
+
+        // Record metrics
+        if let Some(metrics) = &self.metrics {
+            let total_time_us = start_total.elapsed().as_micros() as f32;
+            metrics.add_sample(GenerationSample {
+                underground_check_time_us,
+                underground_fill_time_us,
+                height_calculation_time_us,
+                block_placement_time_us,
+                total_time_us,
+                was_underground,
+                timestamp: Instant::now(),
+            });
         }
 
         chunk
@@ -102,26 +218,25 @@ impl TerrainGenerator {
     }
 
     /// Calculate terrain height at world XZ coordinates
+    /// SIMPLIFIÉ: Un seul niveau de noise "numérique"
     fn calculate_height(&self, x: i32, z: i32) -> i32 {
         let fx = x as f32 * self.config.frequency;
         let fz = z as f32 * self.config.frequency;
 
-        // Multi-octave noise for more interesting terrain
-        let noise1 = Self::noise_2d(fx, fz, self.config.seed);
-        let noise2 = Self::noise_2d(fx * 2.0, fz * 2.0, self.config.seed + 1000);
-        let noise3 = Self::noise_2d(fx * 4.0, fz * 4.0, self.config.seed + 2000);
+        // Un seul niveau de noise à échelle 1 (plus "numérique")
+        let noise = Self::noise_2d(fx, fz, self.config.seed);
 
-        let combined = noise1 * 0.6 + noise2 * 0.25 + noise3 * 0.15;
-
-        let height = self.config.base_height + combined * self.config.amplitude;
+        let height = self.config.base_height + noise * self.config.amplitude;
         height as i32
     }
 
     /// Simple 2D noise function (value noise)
     /// Returns value in range [-1, 1]
+    #[inline]
     fn noise_2d(x: f32, y: f32, seed: u32) -> f32 {
-        let xi = x.floor() as i32;
-        let yi = y.floor() as i32;
+        // Optimisation: éviter floor() coûteux
+        let xi = if x >= 0.0 { x as i32 } else { (x - 1.0) as i32 };
+        let yi = if y >= 0.0 { y as i32 } else { (y - 1.0) as i32 };
 
         let xf = x - xi as f32;
         let yf = y - yi as f32;
@@ -136,34 +251,37 @@ impl TerrainGenerator {
         let c = Self::hash_2d(xi, yi + 1, seed);
         let d = Self::hash_2d(xi + 1, yi + 1, seed);
 
-        // Bilinear interpolation
-        let x1 = Self::lerp(a, b, u);
-        let x2 = Self::lerp(c, d, u);
-        Self::lerp(x1, x2, v)
+        // Bilinear interpolation - optimisé inline
+        let x1 = a + (b - a) * u;
+        let x2 = c + (d - c) * u;
+        x1 + (x2 - x1) * v
     }
 
     /// Hash function for 2D coordinates
     /// Returns value in range [-1, 1]
+    #[inline(always)]
     fn hash_2d(x: i32, y: i32, seed: u32) -> f32 {
+        // Utiliser des primes optimisées pour les CPU modernes
         let mut n = x
-            .wrapping_mul(374761393)
-            .wrapping_add(y.wrapping_mul(668265263))
+            .wrapping_mul(1619)
+            .wrapping_add(y.wrapping_mul(31337))
             .wrapping_add(seed as i32);
-        n = (n ^ (n >> 13)).wrapping_mul(1274126177);
-        n = n ^ (n >> 16);
+        
+        // Mix bits plus efficace (splitmix32 style)
+        n ^= n >> 15;
+        n = n.wrapping_mul(0x85ebca6b_u32 as i32);
+        n ^= n >> 13;
+        n = n.wrapping_mul(0xc2b2ae35_u32 as i32);
+        n ^= n >> 16;
 
-        // Convert to [-1, 1]
-        (n as f32 / i32::MAX as f32).clamp(-1.0, 1.0)
+        // Conversion optimisée sans clamp (plus rapide)
+        (n as f32) * (2.0 / 4294967296.0) - 1.0
     }
 
     /// Smoothstep function for smooth interpolation
+    #[inline]
     fn smoothstep(t: f32) -> f32 {
         t * t * (3.0 - 2.0 * t)
-    }
-
-    /// Linear interpolation
-    fn lerp(a: f32, b: f32, t: f32) -> f32 {
-        a + (b - a) * t
     }
 }
 
@@ -179,13 +297,15 @@ impl crate::volume::ProceduralProvider for TerrainGenerator {
     fn generate_chunk(&self, chunk_pos: IVec3) -> Box<dyn crate::voxel_schema::VoxelSchema> {
         let chunk = TerrainGenerator::generate_chunk(self, chunk_pos);
 
-        // Convert Chunk to BlockSchema
+        // Convert Chunk to BlockSchema - OPTIMISÉ: skip air blocks
         let mut schema = crate::voxel_schema::BlockSchema::new(chunk_pos);
         for z in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     let block = chunk.get(x, y, z);
-                    schema.set_local(x, y, z, block);
+                    if block != AIR {
+                        schema.set_local(x, y, z, block);
+                    }
                 }
             }
         }

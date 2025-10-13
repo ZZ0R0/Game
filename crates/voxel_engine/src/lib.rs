@@ -11,6 +11,7 @@ pub mod raycast;
 // New: Chunk loading system with async generation
 pub mod chunk_ring;
 pub mod generator;
+pub mod generator_metrics;
 pub mod job_queue;
 pub mod storage;
 

@@ -39,6 +39,8 @@ struct FrameProfiler {
     job_processing_ms: f32,
     rendering_ms: f32,
     total_frame_ms: f32,
+    job_get_stats_ms: f32,
+    dirty_chunk_update_ms: f32,
 
     // Counters
     chunks_loaded: usize,
@@ -48,6 +50,7 @@ struct FrameProfiler {
     draw_calls: usize,
     jobs_pending: usize,
     jobs_completed: usize,
+
 
     // Rendering stats (updated each frame)
     visible_chunks: usize,
@@ -69,6 +72,8 @@ impl FrameProfiler {
             job_processing_ms: 0.0,
             rendering_ms: 0.0,
             total_frame_ms: 0.0,
+            job_get_stats_ms: 0.0,
+            dirty_chunk_update_ms: 0.0,
 
             chunks_loaded: 0,
             chunks_meshed: 0,
@@ -95,6 +100,8 @@ impl FrameProfiler {
         self.job_processing_ms = 0.0;
         self.rendering_ms = 0.0;
         self.total_frame_ms = 0.0;
+        self.job_get_stats_ms = 0.0;
+        self.dirty_chunk_update_ms = 0.0;
         self.chunks_meshed = 0;
         self.chunks_unloaded = 0;
         self.draw_calls = 0;
@@ -138,8 +145,8 @@ impl FrameProfiler {
             fps, avg_frame, min_frame, max_frame, self.slow_frames
         );
         println!(
-            "   Breakdown: Load={:.1}ms, Jobs={:.1}ms, Render={:.1}ms",
-            self.chunk_loading_ms, self.job_processing_ms, self.rendering_ms
+            "   Breakdown:\n Chunk-Loading={:.1}ms\n Jobs-Processing={:.1}ms\n Rendering={:.1}ms\n Stats-Get={:.1}ms\n Dirty-Chunk-Update={:.1}ms\n Total={:.1}ms",
+            self.chunk_loading_ms, self.job_processing_ms, self.rendering_ms, self.job_get_stats_ms, self.dirty_chunk_update_ms, self.total_frame_ms
         );
         println!(
             "   Chunks: {} loaded, {} rendered ({} visible, {} culled), {} unloaded",
@@ -258,9 +265,14 @@ impl App {
         // Create meshing configuration from settings (use greedy meshing by default)
         let meshing_config = MeshingConfig::new(true);
 
+        // Create terrain generator with metrics enabled
+        let terrain_generator = TerrainGenerator::with_metrics(
+            voxel_engine::generator::TerrainConfig::default(),
+            1000, // Keep 1000 samples max for metrics
+        );
+
         // Create job queue with meshing config (no more workers!)
-        let terrain_generator = TerrainGenerator::default();
-        let job_queue = Arc::new(JobQueue::with_config(terrain_generator, meshing_config));
+        let job_queue = Arc::new(JobQueue::with_config(terrain_generator.clone(), meshing_config));
 
         // Configure chunk ring based on render distance from config
         let view_radius = config.calculate_view_radius();
@@ -307,7 +319,7 @@ impl App {
             chunk_manager: ChunkManager::new(),
             chunk_ring: ChunkRing::new(ring_config),
             job_queue,
-            terrain_generator: TerrainGenerator::default(),
+            terrain_generator,
             chunk_pool: ChunkPool::new(512),
             mesh_pool: MeshPool::new(512),
             voxel_mesh: None,
@@ -445,7 +457,13 @@ impl App {
 
             // Update performance overlay (NOUVEAU)
             if let Some(index) = self.perf_overlay {
-                let perf_text = self.performance_monitor.get_overlay_text();
+                // Get generator stats if available
+                let perf_text = if let Some(metrics) = self.terrain_generator.metrics() {
+                    let gen_stats = metrics.get_stats(self.config.world.worker_threads);
+                    self.performance_monitor.get_overlay_text_with_generator(&gen_stats)
+                } else {
+                    self.performance_monitor.get_overlay_text()
+                };
                 g.update_overlay_text(index, perf_text);
             }
         }
@@ -1054,15 +1072,19 @@ impl ApplicationHandler for App {
             self.profiler.job_processing_ms = t1.elapsed().as_secs_f32() * 1000.0;
 
             // Update job queue stats
+            let t2 = Instant::now();
             let job_stats = self.job_queue.get_stats();
             self.profiler.jobs_pending = job_stats.pending_count;
             self.profiler.jobs_completed = job_stats.completed_count;
+            self.profiler.job_get_stats_ms = t2.elapsed().as_secs_f32() * 1000.0;
 
             // Update chunk count
             self.profiler.chunks_loaded = self.chunk_ring.loaded_count();
 
             // Update dirty chunks (from block editing)
+            let t3 = Instant::now();
             self.update_dirty_chunks();
+            self.profiler.dirty_chunk_update_ms = t3.elapsed().as_secs_f32() * 1000.0;
 
             self.engine.tick_once();
             self.next_tick += self.dt;

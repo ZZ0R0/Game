@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
+use voxel_engine::generator_metrics::GeneratorStats;
 
 /// Moniteur de performances en temps réel pour l'overlay
 #[derive(Debug, Clone)]
@@ -217,6 +218,92 @@ impl PerformanceMonitor {
             self.meshing_work_per_worker_ms,
             self.generation_work_per_worker_ms + self.meshing_work_per_worker_ms,
             self.estimated_worker_idle_time_ms,
+            self.total_chunks_loaded,
+            self.total_chunks_rendered,
+            self.total_chunks_culled,
+            self.total_draw_calls,
+            self.jobs_pending,
+            self.worker_count
+        )
+    }
+
+    /// Générer le texte complet avec les détails du générateur
+    pub fn get_overlay_text_with_generator(&self, gen_stats: &GeneratorStats) -> String {
+        format!(
+            "🔧 PERFORMANCE MONITOR\n\
+            ═══════════════════════\n\
+            📊 FPS: {:.1} ({:.1}ms/frame)\n\
+            \n\
+            🏗️  CHUNK PROCESSING:\n\
+            • Generated: {:.1}/sec (avg: {:.1}ms)\n\
+            • Meshed: {:.1}/sec (avg: {:.1}ms)\n\
+            \n\
+            ⚙️  WORKER LOAD:\n\
+            • Gen work/worker: {:.1}ms/sec\n\
+            • Mesh work/worker: {:.1}ms/sec\n\
+            • Total work/worker: {:.1}ms/sec\n\
+            • Worker idle: {:.1}ms/sec\n\
+            \n\
+            🔨 GENERATOR DETAIL:\n\
+            • Underground ratio: {:.1}%\n\
+            • Avg time per chunk: {:.3}ms\n\
+            \n\
+            ⏱️  Generator phases (avg):\n\
+            • Underground check: {:.3}ms\n\
+            • Underground fill: {:.3}ms\n\
+            • Height calc: {:.3}ms\n\
+            • Block placement: {:.3}ms\n\
+            \n\
+            💼 Generator work/sec:\n\
+            • Underground check: {:.1}ms\n\
+            • Underground fill: {:.1}ms\n\
+            • Height calc: {:.1}ms\n\
+            • Block placement: {:.1}ms\n\
+            • Total: {:.1}ms\n\
+            \n\
+            👷 Generator work/worker:\n\
+            • Underground check: {:.1}ms\n\
+            • Underground fill: {:.1}ms\n\
+            • Height calc: {:.1}ms\n\
+            • Block placement: {:.1}ms\n\
+            • Total: {:.1}ms\n\
+            \n\
+            🎮 RENDERING:\n\
+            • Loaded: {} chunks\n\
+            • Rendered: {} ({} culled)\n\
+            • Draw calls: {}\n\
+            • Jobs pending: {}\n\
+            \n\
+            ⚡ WORKERS: {} threads",
+            // Main stats
+            self.avg_fps,
+            self.avg_frame_time_ms,
+            self.chunks_per_sec_generated,
+            self.avg_generation_time_ms,
+            self.chunks_per_sec_meshed,
+            self.avg_meshing_time_ms,
+            self.generation_work_per_worker_ms,
+            self.meshing_work_per_worker_ms,
+            self.generation_work_per_worker_ms + self.meshing_work_per_worker_ms,
+            self.estimated_worker_idle_time_ms,
+            // Generator detail
+            gen_stats.underground_ratio * 100.0,
+            gen_stats.avg_total_ms,
+            gen_stats.avg_underground_check_ms,
+            gen_stats.avg_underground_fill_ms,
+            gen_stats.avg_height_calc_ms,
+            gen_stats.avg_block_placement_ms,
+            gen_stats.total_underground_check_work_ms,
+            gen_stats.total_underground_fill_work_ms,
+            gen_stats.total_height_calc_work_ms,
+            gen_stats.total_block_placement_work_ms,
+            gen_stats.total_generation_work_ms,
+            gen_stats.underground_check_work_per_worker_ms,
+            gen_stats.underground_fill_work_per_worker_ms,
+            gen_stats.height_calc_work_per_worker_ms,
+            gen_stats.block_placement_work_per_worker_ms,
+            gen_stats.total_work_per_worker_ms,
+            // Rendering stats
             self.total_chunks_loaded,
             self.total_chunks_rendered,
             self.total_chunks_culled,
