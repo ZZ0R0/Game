@@ -1,0 +1,11 @@
+[package]
+name = "game-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+game-core = { path = "../game_core" }
+game-protocol = { path = "../game_protocol" }
+game-renderer = { path = "../game_renderer" }
+net-transport = { path = "../net_transport" }
+winit = "0.30"

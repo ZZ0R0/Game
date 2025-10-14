@@ -1,0 +1,10 @@
+[package]
+name = "game-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+game-core = { path = "../game_core" }
+game-protocol = { path = "../game_protocol" }
+net-transport = { path = "../net_transport" }
+tokio = { version = "1", features = ["full"] }
