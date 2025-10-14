@@ -1,19 +1,10 @@
 [workspace]
 members = [
-  "crates/engine_app",
-  "crates/render_wgpu",
-  "crates/engine_core",
-  "crates/voxel_engine",
-  "crates/math_util",
+  "game",
+  "server",
 ]
 resolver = "2"
 
 [profile.dev]
 panic = "abort"
 opt-level = 1
-
-[profile.release]
-panic = "abort"
-lto = "thin"
-codegen-units = 1
-opt-level = "s"
