@@ -8,24 +8,18 @@ pub enum Message {
     // Client to Server messages
     Connect { player_name: String },
     Disconnect,
-    PlayerMove { position: Position, orientation: Orientation },
     PlayerAction { action: PlayerAction },
     
     // Server to Client messages
     Welcome { player_id: u32, world_state: WorldSnapshot },
-    PlayerJoined { player_id: u32, name: String, position: Position },
-    PlayerLeft { player_id: u32 },
-    WorldUpdate { delta: WorldDelta },
+    WorldSnapshot { snapshot: WorldSnapshot },
     Error { message: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlayerAction {
+    UpdatePosition { position: Position },
     SpawnShip,
-    DestroyBlock { ship_id: u32, block_id: u32 },
-    AddBlock { ship_id: u32, block_type: String, position: RelPosition },
-    UseOxygen,
-    UseEnergy,
 }
 
 /// Complete world state snapshot (sent on connect)
@@ -35,60 +29,30 @@ pub struct WorldSnapshot {
     pub ships: HashMap<u32, ShipState>,
 }
 
-/// Minimal delta updates (sent during gameplay)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorldDelta {
-    pub player_updates: HashMap<u32, PlayerDelta>,
-    pub ship_updates: HashMap<u32, ShipDelta>,
-    pub removed_players: Vec<u32>,
-    pub removed_ships: Vec<u32>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
     pub name: String,
     pub position: Position,
-    pub orientation: Orientation,
     pub health: f32,
-    pub oxygen: f32,
-    pub energy: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlayerDelta {
-    pub position: Option<Position>,
-    pub orientation: Option<Orientation>,
-    pub health: Option<f32>,
-    pub oxygen: Option<f32>,
-    pub energy: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShipState {
     pub name: String,
     pub position: Position,
-    pub orientation: Orientation,
     pub blocks: Vec<BlockState>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShipDelta {
-    pub position: Option<Position>,
-    pub orientation: Option<Orientation>,
-    pub blocks_added: Vec<BlockState>,
-    pub blocks_removed: Vec<u32>,
-    pub blocks_damaged: Vec<(u32, f32)>, // (block_id, new_integrity)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockState {
     pub id: u32,
     pub name: String,
+    pub block_type: String,
     pub position: RelPosition,
     pub integrity: f32,
 }
 
-/// Network connection management using WebSockets (efficient and QUIC-like for game protocol)
+/// Network connection management using WebSockets
 pub mod connection {
     use super::*;
     use anyhow::Result;
@@ -268,10 +232,7 @@ pub mod conversion {
             Self {
                 name: player.name.clone(),
                 position: player.physical.placed.position.clone(),
-                orientation: player.physical.placed.orientation.clone(),
                 health: player.health,
-                oxygen: player.oxygen,
-                energy: player.energy,
             }
         }
     }
@@ -281,10 +242,10 @@ pub mod conversion {
             Self {
                 name: ship.grid.name.clone(),
                 position: ship.grid.physical.placed.position.clone(),
-                orientation: ship.grid.physical.placed.orientation.clone(),
                 blocks: ship.large_blocks.iter().map(|b| BlockState {
                     id: b.id,
                     name: b.name.clone(),
+                    block_type: b.block_type.clone(),
                     position: b.block.rel_object.position.clone(),
                     integrity: b.block.integrity,
                 }).collect(),

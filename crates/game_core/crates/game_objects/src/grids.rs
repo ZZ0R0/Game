@@ -1,5 +1,5 @@
 use crate::objects::PhysicalObject;
-use crate::blocks::{large_blocks::LargeBlock, small_blocks::SmallBlock};
+use crate::blocks::{large_blocks::LargeBlock, small_blocks::SmallBlock, RelPosition};
 
 #[derive(Debug, Clone)]
 pub struct GridId(pub u32);
@@ -55,9 +55,9 @@ pub mod large_grids {
             
             let mut large_grid = Self::new(grid);
             
-            // Add a single default armor block
-            let default_block = LargeBlock::default_armor(0);
-            large_grid.add_block(default_block);
+            // Add a single light armor block at origin
+            let light_armor = LargeBlock::light_armor_block(0, RelPosition::zero());
+            large_grid.add_block(light_armor);
             
             large_grid
         }

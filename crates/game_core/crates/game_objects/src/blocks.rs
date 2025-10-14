@@ -93,25 +93,38 @@ impl Block {
 }
 
 pub mod large_blocks {
-    use super::Block;
+    use super::{Block, RelObject, RelPosition, RelOrientation};
 
     #[derive(Debug, Clone)]
     pub struct LargeBlock {
         pub id: u32,
         pub name: String,
+        pub block_type: String,
         pub block: Block,
     }
 
     impl LargeBlock {
-        pub fn new(id: u32, name: String, block: Block) -> Self {
-            Self { id, name, block }
+        pub fn new(id: u32, name: String, block_type: String, block: Block) -> Self {
+            Self { id, name, block_type, block }
         }
 
         pub fn default_armor(id: u32) -> Self {
             Self {
                 id,
                 name: "Large Armor Block".to_string(),
+                block_type: "heavy_armor_block".to_string(),
                 block: Block::default_heavy_armor(),
+            }
+        }
+
+        pub fn light_armor_block(id: u32, position: RelPosition) -> Self {
+            let rel_object = RelObject::new(position, RelOrientation::identity(), 500.0);
+            let block = Block::new("Light Armor Block".to_string(), 100.0, rel_object);
+            Self {
+                id,
+                name: "Light Armor Block".to_string(),
+                block_type: "light_armor_block".to_string(),
+                block,
             }
         }
     }

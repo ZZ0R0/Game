@@ -18,11 +18,12 @@ Instruction :
 7) fais les choses commes elles serait faites par un developpeur professionel, ne fais pas de courts circuits dans tes raisonementsn le but est d'avoir le meilleur code possible, mais ne jamais oublier les instruction numéro 3
 
 TODO :
-1) compléter et corriger le code POO dans game_core pour que toutes les structs fonctionnent de base
-2) implémenter les méthodes de base pour ces structs avec par exemple la création d'un vaisseau par défaut composé d'un surl bloc de large grid 
-3) créer un protocole client seveur utilisant quick pour communiquer 
-4) créer une fenètre de base pour le client qui recoit les controles
-5) créer un rendu graphique de base dans le crate dédié au rendering
+0) ✅ FAIT - Le cube affiché est maintenant un light_armor_block appartenant à un LargeGrid créé par le serveur et rendu par le client
+1) ✅ FAIT - Overlay console ajouté avec affichage des informations de jeu
+2) ✅ FAIT - Compteur FPS affiché dans la console (environ 60 FPS)
+3) ✅ FAIT - Position et orientation du joueur affichées dans la console
+4) ajouter un mode plein écran avec F11
+
 
 
 

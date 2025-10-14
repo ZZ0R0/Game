@@ -1,6 +1,7 @@
 use game_core::{world::GameWorld, objects::Position};
 use game_protocol::{Message, PlayerAction, connection::GameServer, conversion};
 use std::net::SocketAddr;
+use std::collections::HashMap;
 use tokio::time::{interval, Duration};
 
 #[tokio::main]
@@ -12,6 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = "127.0.0.1:8080".parse()?;
     let mut server = GameServer::new(addr).await?;
     let mut world = GameWorld::new();
+    let mut client_to_player: HashMap<u32, u32> = HashMap::new();
     
     println!("🌐 Server listening on {}", addr);
     println!("📡 WebSocket-based protocol active (QUIC-like functionality)");
@@ -42,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // Handle incoming messages
             Some((client_id, message)) = server.message_rx.recv() => {
-                handle_client_message(&mut server, &mut world, client_id, message).await?;
+                handle_client_message(&mut server, &mut world, &mut client_to_player, client_id, message).await?;
             }
             
             // Game world update tick
@@ -62,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_client_message(
     server: &mut GameServer,
     world: &mut GameWorld,
+    client_to_player: &mut HashMap<u32, u32>,
     client_id: u32,
     message: Message,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -72,6 +75,9 @@ async fn handle_client_message(
             let spawn_pos = Position::new(0.0, 100.0, 0.0);
             let (player_id, ship_id) = world.spawn_new_player(&player_name, spawn_pos.clone());
             
+            // Map client_id to player_id
+            client_to_player.insert(client_id, player_id);
+            
             // Send welcome message with world state
             let world_snapshot = conversion::world_to_snapshot(world);
             let welcome = Message::Welcome { 
@@ -80,54 +86,37 @@ async fn handle_client_message(
             };
             server.send_to_client(client_id, welcome)?;
             
-            // Notify other players
-            let join_msg = Message::PlayerJoined {
-                player_id,
-                name: player_name.clone(),
-                position: spawn_pos,
-            };
-            server.broadcast(join_msg)?;
-            
             println!("✅ Player '{}' spawned with ship {} at position (0, 100, 0)", 
                     player_name, ship_id);
         }
         
-        Message::PlayerMove { position, orientation } => {
-            // Update player position in world
-            if let Some(player) = world.players.values_mut().find(|p| p.id.0 == client_id) {
-                player.physical.placed.position = position;
-                player.physical.placed.orientation = orientation;
-            }
-        }
-        
         Message::PlayerAction { action } => {
             match action {
+                PlayerAction::UpdatePosition { position } => {
+                    if let Some(&player_id) = client_to_player.get(&client_id) {
+                        if let Some(player) = world.players.get_mut(&player_id) {
+                            player.physical.placed.position = position;
+                        }
+                    }
+                }
                 PlayerAction::SpawnShip => {
-                    if let Some(player) = world.players.get(&client_id) {
-                        let player_name = player.name.clone();
-                        let ship_id = world.add_ship(&player_name);
-                        println!("🚢 Player {} spawned new ship {}", player_name, ship_id);
+                    if let Some(&player_id) = client_to_player.get(&client_id) {
+                        if let Some(player) = world.players.get(&player_id) {
+                            let player_name = player.name.clone();
+                            let ship_id = world.add_ship(&player_name);
+                            println!("🚢 Player {} spawned new ship {}", player_name, ship_id);
+                        }
                     }
                 }
-                PlayerAction::UseOxygen => {
-                    if let Some(player) = world.players.get_mut(&client_id) {
-                        player.refill_oxygen();
-                        println!("🫁 Player {} refilled oxygen", player.name);
-                    }
-                }
-                PlayerAction::UseEnergy => {
-                    if let Some(player) = world.players.get_mut(&client_id) {
-                        player.refill_energy();
-                        println!("⚡ Player {} refilled energy", player.name);
-                    }
-                }
-                _ => {}
             }
         }
         
         Message::Disconnect => {
             println!("🔌 Client {} disconnected", client_id);
             server.disconnect_client(client_id);
+            if let Some(player_id) = client_to_player.remove(&client_id) {
+                world.players.remove(&player_id);
+            }
         }
         
         _ => {
@@ -142,23 +131,9 @@ async fn broadcast_world_updates(
     server: &GameServer,
     world: &GameWorld,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Create minimal delta update (in a real game, track changes)
-    let delta = game_protocol::WorldDelta {
-        player_updates: world.players.iter().map(|(&id, player)| {
-            (id, game_protocol::PlayerDelta {
-                position: None, // Only send if changed
-                orientation: None,
-                health: Some(player.health),
-                oxygen: Some(player.oxygen),
-                energy: Some(player.energy),
-            })
-        }).collect(),
-        ship_updates: std::collections::HashMap::new(),
-        removed_players: Vec::new(),
-        removed_ships: Vec::new(),
-    };
-    
-    let update_msg = Message::WorldUpdate { delta };
+    // Send full world snapshot instead of deltas for simplicity
+    let snapshot = game_protocol::conversion::world_to_snapshot(world);
+    let update_msg = Message::WorldSnapshot { snapshot };
     server.broadcast(update_msg)?;
     
     Ok(())
