@@ -7,5 +7,4 @@ edition = "2021"
 game-core = { path = "../game_core" }
 game-protocol = { path = "../game_protocol" }
 game-renderer = { path = "../game_renderer" }
-net-transport = { path = "../net_transport" }
 winit = "0.30"

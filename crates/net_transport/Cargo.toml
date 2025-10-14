@@ -1,9 +1,0 @@
-[package]
-name = "net-transport"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-tokio = { version = "1", features = ["full"] }
-quinn = "0.11.9"
-bincode = "2.0.1"

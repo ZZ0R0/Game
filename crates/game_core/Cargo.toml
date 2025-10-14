@@ -7,3 +7,5 @@ edition = "2021"
 [dependencies]
 glam = "0.30.8"
 serde = { version = "1.0", features = ["derive"] }
+# Local dependency on the nested `game-objects` crate (package name contains a hyphen)
+game_objects = { package = "game-objects", path = "crates/game_objects" }
