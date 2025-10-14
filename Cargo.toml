@@ -1,7 +1,10 @@
 [workspace]
 members = [
-  "game",
-  "server",
+  "crates/game_client",
+  "crates/game_server",
+  "crates/game_core",
+  "crates/game_protocol",
+  "crates/net_transport"
 ]
 resolver = "2"
 
