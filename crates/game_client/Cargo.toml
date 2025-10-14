@@ -8,3 +8,8 @@ game-core = { path = "../game_core" }
 game-protocol = { path = "../game_protocol" }
 game-renderer = { path = "../game_renderer" }
 winit = "0.30"
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3"
+tracing = "0.1"
+wgpu = "27.0.1"
+pollster = "0.4.0"

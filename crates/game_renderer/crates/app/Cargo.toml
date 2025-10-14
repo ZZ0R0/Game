@@ -1,4 +1,0 @@
-[dependencies]
-egui = "0.33.0"
-egui-winit = "0.33.0"   # brings winit 0.30.x
-egui-wgpu = "0.33.0"    # brings matching wgpu
