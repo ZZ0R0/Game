@@ -22,13 +22,6 @@ pub enum PlayerAction {
     SpawnShip,
 }
 
-/// Complete world state snapshot (sent on connect)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorldSnapshot {
-    pub players: HashMap<u32, PlayerState>,
-    pub ships: HashMap<u32, ShipState>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
     pub name: String,
@@ -41,6 +34,7 @@ pub struct ShipState {
     pub name: String,
     pub position: Position,
     pub blocks: Vec<BlockState>,
+    pub version: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,6 +243,7 @@ pub mod conversion {
                     position: b.block.rel_object.position.clone(),
                     integrity: b.block.integrity,
                 }).collect(),
+                version: ship.grid.version,
             }
         }
     }

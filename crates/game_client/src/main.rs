@@ -8,9 +8,30 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     application::ApplicationHandler,
 };
-use tokio::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
+
+/// Thread-safe game state shared between main thread and network thread
+#[derive(Debug, Clone)]
+struct SharedGameState {
+    pub player_position: game_core::objects::Position,
+    pub pending_actions: Vec<PlayerAction>,
+    pub world_state: Option<WorldSnapshot>,
+    pub player_id: Option<u32>,
+    pub network_connected: bool,
+}
+
+impl Default for SharedGameState {
+    fn default() -> Self {
+        Self {
+            player_position: game_core::objects::Position::new(0.0, 0.0, 0.0),
+            pending_actions: Vec::new(),
+            world_state: None,
+            player_id: None,
+            network_connected: false,
+        }
+    }
+}
 
 struct GameApp {
     renderer: Option<Renderer>,
@@ -21,11 +42,12 @@ struct GameApp {
     fps_timer: std::time::Instant,
     current_fps: f32,
     mouse_captured: bool,
-    world_state: Option<WorldSnapshot>,
-    player_id: Option<u32>,
-    // Network communication channels
-    action_sender: Option<mpsc::UnboundedSender<PlayerAction>>,
-    message_receiver: Option<mpsc::UnboundedReceiver<Message>>,
+    is_fullscreen: bool,
+    // Shared game state (thread-safe)
+    shared_state: Arc<Mutex<SharedGameState>>,
+    // Network throttling for local updates
+    last_network_sync: std::time::Instant,
+    network_sync_interval: std::time::Duration,
 }
 
 impl GameApp {
@@ -40,140 +62,135 @@ impl GameApp {
             fps_timer: now,
             current_fps: 0.0,
             mouse_captured: false,
-            world_state: None,
-            player_id: None,
-            action_sender: None,
-            message_receiver: None,
+            is_fullscreen: false,
+            shared_state: Arc::new(Mutex::new(SharedGameState::default())),
+            last_network_sync: now,
+            network_sync_interval: std::time::Duration::from_millis(16), // ~60 FPS network sync
         }
     }
 
     fn start_networking(&mut self) {
         println!("Space Engineers Clone - Starting networking thread");
         
-        let (action_tx, action_rx) = mpsc::unbounded_channel::<PlayerAction>();
-        let (message_tx, message_rx) = mpsc::unbounded_channel::<Message>();
-        
-        // Store channels
-        self.action_sender = Some(action_tx);
-        self.message_receiver = Some(message_rx);
+        let shared_state = Arc::clone(&self.shared_state);
         
         // Spawn networking thread with tokio runtime
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                run_network_client(action_rx, message_tx).await;
+                run_network_client(shared_state).await;
             });
         });
     }
 
     fn update(&mut self) {
-        let now = std::time::Instant::now();
-        let dt = now.duration_since(self.last_frame_time).as_secs_f32();
-        self.last_frame_time = now;
+        let t1 = std::time::Instant::now();
+        let dt = t1.duration_since(self.last_frame_time).as_secs_f32();
+        self.last_frame_time = t1;
 
         // Calculate FPS
         self.frame_count += 1;
-        let elapsed = now.duration_since(self.fps_timer).as_secs_f32();
+        let elapsed = t1.duration_since(self.fps_timer).as_secs_f32();
         if elapsed >= 1.0 {
             self.current_fps = self.frame_count as f32 / elapsed;
             self.frame_count = 0;
-            self.fps_timer = now;
+            self.fps_timer = t1;
         }
 
         // Update camera with FPS controls
         self.input_handler.update_camera(&mut self.camera, dt);
 
-        // Send player position to server
-        if let Some(ref sender) = self.action_sender {
-            use game_core::objects::Position;
-            let position = Position::new(
-                self.camera.position.x,
-                self.camera.position.y,
-                self.camera.position.z,
-            );
-            let _ = sender.send(PlayerAction::UpdatePosition { position });
+        // Update shared state with current player position (non-blocking)
+        if t1.duration_since(self.last_network_sync) >= self.network_sync_interval {
+            if let Ok(mut state) = self.shared_state.try_lock() {
+                state.player_position = game_core::objects::Position::new(
+                    self.camera.position.x,
+                    self.camera.position.y,
+                    self.camera.position.z,
+                );
+            }
+            self.last_network_sync = t1;
         }
 
-        // Process network messages from networking thread
-        if let Some(ref mut receiver) = self.message_receiver {
-            let mut messages = Vec::new();
-            while let Ok(message) = receiver.try_recv() {
-                messages.push(message);
-            }
-            for message in messages {
-                self.handle_server_message(message);
+        let t2 = std::time::Instant::now();
+        let d1 = t2.duration_since(t1).as_millis();
+        // Get latest world state from shared data (non-blocking)
+        let should_update = if let Ok(state) = self.shared_state.try_lock() {
+            state.world_state.is_some()
+        } else {
+            false
+        };
+
+        let t3 = std::time::Instant::now();
+        let d2 = t3.duration_since(t2).as_millis();
+
+        if should_update {
+            if let Ok(state) = self.shared_state.try_lock() {
+                if let Some(ref world_state) = state.world_state {
+                    if let Some(ref mut renderer) = self.renderer {
+                        let mut blocks = Vec::new();
+                        
+                        // Convert all ships' blocks to BlockInstances
+                        for (_ship_id, ship) in &world_state.ships {
+                            let ship_pos = glam::Vec3::new(
+                                ship.position.x,
+                                ship.position.y,
+                                ship.position.z,
+                            );
+                            
+                            for block in &ship.blocks {
+                                // Calculate world position: ship position + block relative position (2.5m per block for large grids)
+                                let block_world_pos = ship_pos + glam::Vec3::new(
+                                    block.position.x as f32 * 2.5,
+                                    block.position.y as f32 * 2.5,
+                                    block.position.z as f32 * 2.5,
+                                );
+                                
+                                blocks.push(BlockInstance {
+                                    id: block.id,
+                                    version: ship.version,
+                                    position: block_world_pos,
+                                    texture_path: format!("assets/textures/large_grids/{}.png", block.block_type),
+                                });
+                            }
+                        }
+                        
+                        renderer.set_blocks_to_render(blocks);
+                    }
+                }
             }
         }
+
+        let t4 = std::time::Instant::now();
+        let d3 = t4.duration_since(t3).as_millis();
 
         // Update overlay data in renderer
         if let Some(ref mut renderer) = self.renderer {
-            let player_pos = if let (Some(ref world_state), Some(player_id)) = (&self.world_state, self.player_id) {
-                world_state.players.get(&player_id).map(|p| {
-                    glam::Vec3::new(p.position.x, p.position.y, p.position.z)
-                })
+            let player_pos = if let Ok(state) = self.shared_state.try_lock() {
+                if let (Some(ref world_state), Some(player_id)) = (&state.world_state, state.player_id) {
+                    world_state.players.get(&player_id).map(|p| {
+                        glam::Vec3::new(p.position.x, p.position.y, p.position.z)
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             };
 
             renderer.update_overlay_data(self.current_fps, player_pos);
         }
+        let t5 = std::time::Instant::now();
+        let d4 = t5.duration_since(t4).as_millis();
+
+       // println!("Update timings: get_state={}ms, process_state={}ms, update_overlay={}ms", d2, d3, d4);
     }
 
-    fn handle_server_message(&mut self, message: Message) {
-        match message {
-            Message::Welcome { player_id, world_state } => {
-                println!("Welcome! Player {} in world with {} ships", 
-                        player_id, world_state.ships.len());
-                self.player_id = Some(player_id);
-                self.world_state = Some(world_state);
-                self.update_render_data();
-            }
-            Message::WorldSnapshot { snapshot } => {
-                // Update world state with new snapshot
-                self.world_state = Some(snapshot);
-                self.update_render_data();
-            }
-            Message::Error { message } => {
-                println!("Server error: {}", message);
-            }
-            _ => {}
-        }
-    }
 
-    fn update_render_data(&mut self) {
-        if let (Some(ref world_state), Some(ref mut renderer)) = (&self.world_state, &mut self.renderer) {
-            let mut blocks = Vec::new();
-            
-            // Convert all ships' blocks to BlockInstances
-            for (_ship_id, ship) in &world_state.ships {
-                let ship_pos = glam::Vec3::new(
-                    ship.position.x,
-                    ship.position.y,
-                    ship.position.z,
-                );
-                
-                for block in &ship.blocks {
-                    // Calculate world position: ship position + block relative position (2.5m per block for large grids)
-                    let block_world_pos = ship_pos + glam::Vec3::new(
-                        block.position.x as f32 * 2.5,
-                        block.position.y as f32 * 2.5,
-                        block.position.z as f32 * 2.5,
-                    );
-                    
-                    blocks.push(BlockInstance {
-                        position: block_world_pos,
-                        texture_path: format!("assets/textures/large_grids/{}.png", block.block_type),
-                    });
-                }
-            }
-            
-            renderer.set_blocks_to_render(blocks);
-        }
-    }
 
     fn send_action(&self, action: PlayerAction) {
-        if let Some(ref sender) = self.action_sender {
-            let _ = sender.send(action);
+        if let Ok(mut state) = self.shared_state.try_lock() {
+            state.pending_actions.push(action);
         }
     }
 
@@ -254,6 +271,18 @@ impl ApplicationHandler for GameApp {
                             self.send_action(PlayerAction::SpawnShip);
                             println!("Spawning ship...");
                         }
+                        KeyCode::F11 => {
+                            // Toggle fullscreen
+                            if let Some(ref renderer) = self.renderer {
+                                self.is_fullscreen = !self.is_fullscreen;
+                                if self.is_fullscreen {
+                                    renderer.window().set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                                } else {
+                                    renderer.window().set_fullscreen(None);
+                                }
+                                println!("Fullscreen: {}", self.is_fullscreen);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -295,10 +324,7 @@ impl ApplicationHandler for GameApp {
     }
 }
 
-async fn run_network_client(
-    mut action_rx: mpsc::UnboundedReceiver<PlayerAction>,
-    message_tx: mpsc::UnboundedSender<Message>
-) {
+async fn run_network_client(shared_state: Arc<Mutex<SharedGameState>>) {
     println!("Network thread started");
     
     // Connect to server
@@ -307,6 +333,9 @@ async fn run_network_client(
         match client.connect("127.0.0.1:8080").await {
             Ok(()) => {
                 println!("Connected to server");
+                if let Ok(mut state) = shared_state.lock() {
+                    state.network_connected = true;
+                }
                 break;
             }
             Err(_) => {
@@ -326,26 +355,69 @@ async fn run_network_client(
     let ws_tx = client.ws_tx.clone();
     let mut client_rx = client.message_rx;
     
-    // Spawn task to forward server messages to main thread
-    let message_tx_clone = message_tx.clone();
+    // Spawn task to handle server messages
+    let shared_state_msgs = Arc::clone(&shared_state);
     tokio::spawn(async move {
         while let Some(message) = client_rx.recv().await {
-            let _ = message_tx_clone.send(message);
+            handle_network_message(&shared_state_msgs, message).await;
         }
     });
     
-    // Send player actions to server
+    // Main network loop: send pending actions and position updates
     if let Some(tx) = ws_tx {
-        while let Some(action) = action_rx.recv().await {
-            let msg = Message::PlayerAction { action };
-            let _ = tx.send(msg);
+        let mut last_position_send = std::time::Instant::now();
+        let position_send_interval = std::time::Duration::from_millis(16); // ~60 FPS
+        
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            
+            if let Ok(mut state) = shared_state.try_lock() {
+                // Send pending actions
+                for action in state.pending_actions.drain(..) {
+                    let msg = Message::PlayerAction { action };
+                    let _ = tx.send(msg);
+                }
+                
+                // Send position updates periodically
+                let now = std::time::Instant::now();
+                if now.duration_since(last_position_send) >= position_send_interval {
+                    let position_msg = Message::PlayerAction { 
+                        action: PlayerAction::UpdatePosition { 
+                            position: state.player_position.clone() 
+                        }
+                    };
+                    let _ = tx.send(position_msg);
+                    last_position_send = now;
+                }
+            }
+        }
+    }
+}
+
+async fn handle_network_message(shared_state: &Arc<Mutex<SharedGameState>>, message: Message) {
+    if let Ok(mut state) = shared_state.lock() {
+        match message {
+            Message::Welcome { player_id, world_state } => {
+                println!("Welcome! Player {} in world with {} ships", 
+                        player_id, world_state.ships.len());
+                state.player_id = Some(player_id);
+                state.world_state = Some(world_state);
+            }
+            Message::WorldSnapshot { snapshot } => {
+                // Update world state with new snapshot
+                state.world_state = Some(snapshot);
+            }
+            Message::Error { message } => {
+                println!("Server error: {}", message);
+            }
+            _ => {}
         }
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Space Engineers Clone - 3D Construction Game");
-    println!("Controls: WASD=move, Mouse=look, F=place block, G=remove block, ESC=toggle mouse");
+    println!("Controls: WASD=move, Shift=sprint, Space/Ctrl=up/down, Mouse=look, F=place block, G=spawn ship, ESC=toggle mouse, F11=fullscreen");
     
     let event_loop = EventLoop::new()?;
     let mut app = GameApp::new();

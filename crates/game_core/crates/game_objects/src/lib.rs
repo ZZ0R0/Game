@@ -4,17 +4,23 @@ pub mod blocks;
 pub mod celestials;
 pub mod grids;
 pub mod humanoids;
+pub mod inventory;
 pub mod items;
 pub mod objects;
 pub mod players;
 pub mod volume;
+pub mod validation;
+pub mod delta_examples;
+pub mod player_celestial_delta_examples;
 
 // Re-export commonly used types
-pub use blocks::{Block, RelObject, RelPosition, RelOrientation, large_blocks::LargeBlock, small_blocks::SmallBlock};
-pub use grids::{Grid, GridId, large_grids::LargeGrid, small_grids::SmallGrid};
-pub use objects::{Position, Velocity, Acceleration, Orientation, PlacedObject, PhysicalObject};
+pub use blocks::{Block, BlockDelta, ComponentDelta, ComponentChange};
+pub use grids::{Grid, GridId, GridDelta};
+pub use objects::{FloatPosition, IntPosition, Velocity, Acceleration, FloatOrientation, IntOrientation, PlacedObject, PhysicalObject};
 pub use volume::Volume;
-pub use players::{Player, PlayerId};
+pub use players::{Player, PlayerId, PlayerDelta};
 pub use items::{Item, ItemId, ItemStack};
-pub use celestials::{CelestialBody, CelestialId, CelestialType};
+pub use inventory::{Inventory};
+pub use celestials::{CelestialBody, CelestialId, CelestialType, CelestialDelta};
 pub use humanoids::{humanoid::Humanoid, humanoid::human::Human};
+pub use validation::{EntityValidation, ValidationResult, ValidationContext};

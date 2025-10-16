@@ -1,0 +1,9 @@
+[package]
+name = "game-world"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+game_objects = { package = "game-objects", path = "../game_objects" }
+ahash = "0.8"

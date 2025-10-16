@@ -8,7 +8,9 @@ use glam::{Vec3, Mat4};
 use wgpu::util::DeviceExt;
 
 mod overlay;
+mod scene_cache;
 use overlay::OverlayRenderer;
+use scene_cache::SceneCache;
 
 pub struct OverlayData {
     pub fps: f32,
@@ -123,7 +125,6 @@ pub struct Renderer {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    model_buffer: wgpu::Buffer,
     model_bind_group_layout: wgpu::BindGroupLayout,
     #[allow(dead_code)]
     texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -131,10 +132,13 @@ pub struct Renderer {
     blocks_to_render: Vec<BlockInstance>,
     overlay_data: OverlayData,
     overlay_renderer: OverlayRenderer,
+    scene_cache: SceneCache,
 }
 
 #[derive(Clone)]
 pub struct BlockInstance {
+    pub id: u32,
+    pub version: u64,
     pub position: Vec3,
     pub texture_path: String,
 }
@@ -340,16 +344,7 @@ impl Renderer {
             label: Some("camera_bind_group"),
         });
         
-        // Create model uniform (identity matrix for now)
-        let model_uniform = ModelUniform {
-            matrix: Mat4::IDENTITY.to_cols_array_2d(),
-        };
-        
-        let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Model Buffer"),
-            contents: bytemuck::cast_slice(&[model_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+
 
         // Create default white texture (1x1 white pixel)
         let texture_size = wgpu::Extent3d {
@@ -411,6 +406,7 @@ impl Renderer {
         };
 
         let overlay_renderer = OverlayRenderer::new(&device, config.format);
+        let scene_cache = SceneCache::new();
         
         Ok(Self {
             window,
@@ -426,13 +422,13 @@ impl Renderer {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            model_buffer,
             model_bind_group_layout,
             texture_bind_group_layout,
             default_texture_bind_group,
             blocks_to_render: Vec::new(),
             overlay_data,
             overlay_renderer,
+            scene_cache,
         })
     }
     
@@ -453,7 +449,44 @@ impl Renderer {
         }
     }
     
+    fn update_bind_groups_cache(&mut self) {
+        // Nettoie le cache des objets obsolètes
+        let active_objects: Vec<(u32, u64)> = self.blocks_to_render.iter()
+            .map(|block| (block.id, block.version))
+            .collect();
+        self.scene_cache.cleanup_old_entries(&active_objects);
+
+        // Vérifie et met à jour les bind groups nécessaires
+        for block in &self.blocks_to_render {
+            if self.scene_cache.is_dirty(block.id, block.version) {
+                let model_matrix = Mat4::from_translation(block.position);
+                let model_uniform = ModelUniform {
+                    matrix: model_matrix.to_cols_array_2d(),
+                };
+                
+                let block_model_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Model Buffer {}", block.id)),
+                    contents: bytemuck::cast_slice(&[model_uniform]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+
+                let new_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &self.model_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: block_model_buffer.as_entire_binding(),
+                    }],
+                    label: Some(&format!("model_bind_group_{}", block.id)),
+                });
+
+                self.scene_cache.cache_bind_group(block.id, block.version, new_bind_group);
+            }
+        }
+    }
+
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // Met à jour le cache des bind groups avant le rendu
+        self.update_bind_groups_cache();
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -492,31 +525,14 @@ impl Renderer {
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-            // Render each block instance
+            // Render each block instance avec cache
             for block in &self.blocks_to_render {
-                // Create model matrix for this block
-                let model_matrix = Mat4::from_translation(block.position);
-                let model_uniform = ModelUniform {
-                    matrix: model_matrix.to_cols_array_2d(),
-                };
-                self.queue.write_buffer(
-                    &self.model_buffer,
-                    0,
-                    bytemuck::cast_slice(&[model_uniform]),
-                );
-
-                let model_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &self.model_bind_group_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.model_buffer.as_entire_binding(),
-                    }],
-                    label: Some("model_bind_group"),
-                });
-
-                render_pass.set_bind_group(1, &model_bind_group, &[]);
-                render_pass.set_bind_group(2, &self.default_texture_bind_group, &[]);
-                render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+                // Utilise le bind group depuis le cache (garanti d'exister après update_bind_groups_cache)
+                if let Some(model_bind_group) = self.scene_cache.get_bind_group(block.id, block.version) {
+                    render_pass.set_bind_group(1, model_bind_group, &[]);
+                    render_pass.set_bind_group(2, &self.default_texture_bind_group, &[]);
+                    render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+                }
             }
         }
 
@@ -576,6 +592,10 @@ impl Renderer {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+    }
+
+    pub fn get_cache_stats(&self) -> scene_cache::CacheStats {
+        self.scene_cache.stats()
     }
 }
 
@@ -646,7 +666,7 @@ impl InputHandler {
         Self {
             keys_pressed: std::collections::HashSet::new(),
             mouse_delta: (0.0, 0.0),
-            mouse_sensitivity: 0.002,
+            mouse_sensitivity: 0.02,
         }
     }
     
@@ -666,7 +686,10 @@ impl InputHandler {
     }
     
     pub fn update_camera(&mut self, camera: &mut Camera, dt: f32) {
-        let speed = 5.0 * dt;
+        let base_speed = 5.0;
+        let sprint_multiplier = if self.keys_pressed.contains(&KeyCode::ShiftLeft) || 
+                                   self.keys_pressed.contains(&KeyCode::ShiftRight) { 2.5 } else { 1.0 };
+        let speed = base_speed * sprint_multiplier * dt;
         
         // Mouse look
         camera.yaw += self.mouse_delta.0 * self.mouse_sensitivity;

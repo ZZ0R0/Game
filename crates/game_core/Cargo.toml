@@ -9,3 +9,6 @@ glam = "0.30.8"
 serde = { version = "1.0", features = ["derive"] }
 # Local dependency on the nested `game-objects` crate (package name contains a hyphen)
 game_objects = { package = "game-objects", path = "crates/game_objects" }
+game_world = { package = "game-world", path = "crates/game_world" }
+game_utils = { package = "game-utils", path = "crates/game_utils" }
+rand = "0.9.2"

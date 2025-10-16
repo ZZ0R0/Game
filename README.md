@@ -18,13 +18,31 @@ Instruction :
 7) fais les choses commes elles serait faites par un developpeur professionel, ne fais pas de courts circuits dans tes raisonementsn le but est d'avoir le meilleur code possible, mais ne jamais oublier les instruction numéro 3
 
 TODO :
-0) ✅ FAIT - Le cube affiché est maintenant un light_armor_block appartenant à un LargeGrid créé par le serveur et rendu par le client
-1) ✅ FAIT - Overlay console ajouté avec affichage des informations de jeu
-2) ✅ FAIT - Compteur FPS affiché dans la console (environ 60 FPS)
-3) ✅ FAIT - Position et orientation du joueur affichées dans la console
-4) ajouter un mode plein écran avec F11
+
+NOW :
+
+1) Implémenter système de cache/dirty flags dans renderer 
+   - Ajouter hash/version des large grid et samll grid pour détecter changements
+   - Ne recréer les bind_groups que si objet modifié et ne modifier que ce qui à été modifié 
 
 
+LATER :
+
+2) Delta updates dans protocol
+   - Modifier WorldSnapshot pour inclure seulement les changements
+   - Ajouter added/modified/removed collections
+
+3) Scene graph avec culling  
+   - Frustum culling pour objets hors écran
+   - Distance LOD pour objets éloignés
+
+4) Instanced rendering
+   - Grouper blocs identiques en une seule draw call
+   - Buffers GPU persistants avec updates partiels
+
+5) Optimiser bind group creation
+   - Pool de bind groups réutilisables  
+   - Eviter create_bind_group à chaque frame
 
 
 
