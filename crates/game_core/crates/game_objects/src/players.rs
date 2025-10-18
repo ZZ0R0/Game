@@ -1,19 +1,23 @@
-use crate::objects::{PhysicalObject, FloatPosition, FloatOrientation, Velocity};
+use crate::objects::{PhysicalObject, FloatPosition, FloatOrientation, Velocity, Acceleration};
+use crate::factions::FactionId;
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlayerId(pub u32);
 
 #[derive(Debug, Clone)]
 pub struct Player {
     pub id: PlayerId,
     pub name: String,
-    pub physical: PhysicalObject,
+    pub physical_object: PhysicalObject,
     pub health: f32,
     pub oxygen: f32,
     pub hydrogen: f32,
     pub energy: f32,
     /// Liste des changements en attente (pour le système de delta)
     pub pending_deltas: Vec<PlayerDelta>,
+
+    pub faction_id: FactionId,
 }
 
 impl Player {
@@ -21,18 +25,51 @@ impl Player {
         Self {
             id: PlayerId(id),
             name,
-            physical: PhysicalObject::default(),
+            physical_object: PhysicalObject::undefined(),
             health: 100.0,
             oxygen: 100.0,
             hydrogen: 100.0,
             energy: 100.0,
             pending_deltas: Vec::new(),
+            faction_id: FactionId(0),
         }
     }
 
+    pub fn get_position(&self) -> &FloatPosition {
+        &self.physical_object.placed_object.position
+    }
+
+    pub fn get_orientation(&self) -> &FloatOrientation {
+        &self.physical_object.placed_object.orientation
+    }
+
+    pub fn get_velocity(&self) -> &Velocity {
+        &self.physical_object.velocity
+    }
+
+    pub fn get_acceleration(&self) -> &Acceleration {
+        &self.physical_object.acceleration
+    }
+
+    pub fn set_position(&mut self, position: FloatPosition) {
+        self.physical_object.placed_object.position = position;
+    }
+
+    pub fn set_orientation(&mut self, orientation: FloatOrientation) {
+        self.physical_object.placed_object.orientation = orientation;
+    }
+
+    pub fn set_velocity(&mut self, velocity: Velocity) {
+        self.physical_object.velocity = velocity;
+    }
+
+    pub fn set_acceleration(&mut self, acceleration: Acceleration) {
+        self.physical_object.acceleration = acceleration;
+    }
+
     pub fn spawn_at(&mut self, position: FloatPosition, orientation: FloatOrientation) {
-        self.physical.placed.position = position;
-        self.physical.placed.orientation = orientation;
+        self.physical_object.placed_object.position = position;
+        self.physical_object.placed_object.orientation = orientation;
     }
 
     pub fn is_alive(&self) -> bool {
@@ -82,12 +119,7 @@ impl Player {
 
     /// Move player to a new position
     pub fn move_to(&mut self, position: FloatPosition) {
-        self.physical.placed.position = position;
-    }
-
-    /// Get player's current position
-    pub fn get_position(&self) -> &FloatPosition {
-        &self.physical.placed.position
+        self.physical_object.placed_object.position = position;
     }
     
     /// Enregistre un changement à appliquer plus tard
@@ -202,15 +234,15 @@ impl PlayerDelta {
     /// Applique le delta à un joueur
     pub fn apply_to(&self, player: &mut Player) {
         if let Some(ref pos) = self.position {
-            player.physical.placed.position = pos.clone();
+            player.physical_object.placed_object.position = pos.clone();
         }
         
         if let Some(ref orient) = self.orientation {
-            player.physical.placed.orientation = orient.clone();
+            player.physical_object.placed_object.orientation = orient.clone();
         }
         
         if let Some(ref vel) = self.velocity {
-            player.physical.velocity = vel.clone();
+            player.physical_object.velocity = vel.clone();
         }
         
         if let Some(health) = self.health {

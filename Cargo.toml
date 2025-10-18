@@ -3,8 +3,6 @@ members = [
   "crates/game_client",
   "crates/game_server",
   "crates/game_core",
-  "crates/game_protocol",
-  "crates/game_core/crates/game_objects"
 ]
 resolver = "2"
 

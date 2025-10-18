@@ -1,33 +1,9 @@
-use crate::objects::{PhysicalObject, FloatPosition, FloatOrientation, Velocity, Acceleration};
+use crate::objects::{PhysicalObject, FloatPosition, FloatOrientation, Velocity, Acceleration, RectBounds};
 use crate::blocks::{Block, BlockDelta};
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 use std::collections::HashMap;
 use rand::{Rng, rng};
-
-
-#[derive(Debug, Clone, Hash)]
-pub struct Boundaries {
-    pub x_min: i32,
-    pub x_max: i32,
-    pub y_min: i32,
-    pub y_max: i32,
-    pub z_min: i32,
-    pub z_max: i32,
-}
-
-impl Boundaries {
-    pub fn null() -> Self {
-        Self {
-            x_min: 0,
-            x_max: 0,
-            y_min: 0,
-            y_max: 0,
-            z_min: 0,
-            z_max: 0,
-        }
-    }
-}
 
 
 #[derive(Debug, Clone, Hash)]
@@ -53,10 +29,10 @@ impl GridId {
 pub struct Grid {
     pub id: GridId,
     pub name: String,
-    pub physical: PhysicalObject,
+    pub physical_object: PhysicalObject,
     pub size_class: GridSizeClass,
     pub blocks: Vec<Block>,
-    pub boundaries: Boundaries,
+    pub boundaries: RectBounds,
     pub hash: u64,
     /// Liste des changements en attente (pour le système de delta)
     pub pending_deltas: Vec<GridDelta>,
@@ -69,9 +45,9 @@ impl Grid {
         self.name.hash(&mut hasher);
         self.size_class.hash(&mut hasher);
         // Position et autres propriétés physiques importantes
-        (self.physical.placed.position.x as u32).hash(&mut hasher);
-        (self.physical.placed.position.y as u32).hash(&mut hasher);
-        (self.physical.placed.position.z as u32).hash(&mut hasher);
+        (self.physical_object.placed_object.position.x as u32).hash(&mut hasher);
+        (self.physical_object.placed_object.position.y as u32).hash(&mut hasher);
+        (self.physical_object.placed_object.position.z as u32).hash(&mut hasher);
         hasher.finish()
     }
 
@@ -85,20 +61,52 @@ impl Grid {
             total_mass += block.current_mass;
         }
         // assign the computed mass to the physical object, then return it
-        self.physical.mass = total_mass;
+        self.physical_object.mass = total_mass;
         total_mass
+    }
+
+    pub fn get_position(&self) -> &FloatPosition {
+        &self.physical_object.placed_object.position
+    }
+
+    pub fn get_orientation(&self) -> &FloatOrientation {
+        &self.physical_object.placed_object.orientation
+    }
+
+    pub fn get_velocity(&self) -> &Velocity {
+        &self.physical_object.velocity
+    }
+
+    pub fn get_acceleration(&self) -> &Acceleration {
+        &self.physical_object.acceleration
+    }
+
+    pub fn set_position(&mut self, position: FloatPosition) {
+        self.physical_object.placed_object.position = position;
+    }
+
+    pub fn set_orientation(&mut self, orientation: FloatOrientation) {
+        self.physical_object.placed_object.orientation = orientation;
+    }
+
+    pub fn set_velocity(&mut self, velocity: Velocity) {
+        self.physical_object.velocity = velocity;
+    }
+
+    pub fn set_acceleration(&mut self, acceleration: Acceleration) {
+        self.physical_object.acceleration = acceleration;
     }
 }
 
 impl Grid {
-    pub fn new(id: u32, name: String, physical: PhysicalObject, size_class: GridSizeClass, blocks: Vec<Block>) -> Self {
+    pub fn new(id: u32, name: String, physical_object: PhysicalObject, size_class: GridSizeClass, blocks: Vec<Block>) -> Self {
         let mut grid = Self {
             id: GridId(id),
             name,
-            physical,
+            physical_object,
             size_class,
             blocks,
-            boundaries: Boundaries::null(),
+            boundaries: RectBounds::null(),
             hash: 0,
             pending_deltas: Vec::new(),
         };
@@ -262,23 +270,23 @@ impl GridDelta {
     pub fn apply_to(&self, grid: &mut Grid) {
         // Appliquer les changements physiques
         if let Some(ref pos) = self.position {
-            grid.physical.placed.position = pos.clone();
+            grid.physical_object.placed_object.position = pos.clone();
         }
         
         if let Some(ref orient) = self.orientation {
-            grid.physical.placed.orientation = orient.clone();
+            grid.physical_object.placed_object.orientation = orient.clone();
         }
         
         if let Some(ref vel) = self.velocity {
-            grid.physical.velocity = vel.clone();
+            grid.physical_object.velocity = vel.clone();
         }
         
         if let Some(ref accel) = self.acceleration {
-            grid.physical.acceleration = accel.clone();
+            grid.physical_object.acceleration = accel.clone();
         }
         
         if let Some(mass) = self.mass {
-            grid.physical.mass = mass;
+            grid.physical_object.mass = mass;
         }
         
         // Appliquer les changements de blocks

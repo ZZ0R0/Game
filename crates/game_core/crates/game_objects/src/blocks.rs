@@ -4,6 +4,7 @@ use crate::grids::Grid;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::collections::HashMap;
+use crate::factions::FactionId;
 
 // Modules de définition de blocks par catégorie
 mod armor;
@@ -336,11 +337,13 @@ pub struct Block {
     pub components: HashMap<String, BlockComponent>,
     /// Liste des changements en attente (pour le système de delta)
     pub pending_deltas: Vec<BlockDelta>,
+
+    pub faction_id: FactionId,
 }
 
 impl Block {
     /// create a new instance from a definition and a relative object (position/orientation)
-    pub fn new(in_grid_id: u64, def: Arc<BlockDef>, ref_grid: Grid, position: IntPosition, orientation: IntOrientation, integrity: f32) -> Self {
+    pub fn new(in_grid_id: u64, def: Arc<BlockDef>, ref_grid: Grid, position: IntPosition, orientation: IntOrientation, integrity: f32, faction_id: FactionId) -> Self {
         Self {
             in_grid_id: in_grid_id,
             ref_grid: ref_grid,
@@ -351,6 +354,7 @@ impl Block {
             def: def,
             components: HashMap::new(),
             pending_deltas: Vec::new(),
+            faction_id: faction_id, 
         }
     }
 

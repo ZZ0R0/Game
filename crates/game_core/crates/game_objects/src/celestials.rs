@@ -12,11 +12,11 @@ pub enum CelestialType {
 }
 
 #[derive(Debug, Clone)]
-pub struct CelestialBody {
+pub struct Celestial {
     pub id: CelestialId,
     pub name: String,
     pub celestial_type: CelestialType,
-    pub physical: PhysicalObject,
+    pub physical_object: PhysicalObject,
     pub radius: f32,
     pub gravity_strength: f32,
     pub atmosphere: bool,
@@ -24,12 +24,12 @@ pub struct CelestialBody {
     pub pending_deltas: Vec<CelestialDelta>,
 }
 
-impl CelestialBody {
+impl Celestial {
     pub fn new(
         id: u32,
         name: String,
         celestial_type: CelestialType,
-        physical: PhysicalObject,
+        physical_object: PhysicalObject,
         radius: f32,
         gravity_strength: f32,
         atmosphere: bool,
@@ -38,7 +38,7 @@ impl CelestialBody {
             id: CelestialId(id),
             name,
             celestial_type,
-            physical,
+            physical_object,
             radius,
             gravity_strength,
             atmosphere,
@@ -46,40 +46,36 @@ impl CelestialBody {
         }
     }
 
-    pub fn earth_like_planet(id: u32) -> Self {
-        Self::new(
-            id,
-            "Earth-like Planet".to_string(),
-            CelestialType::Planet,
-            PhysicalObject::default(),
-            60000.0, // 60km radius
-            9.81,    // Earth gravity
-            true,
-        )
+    pub fn get_position(&self) -> &FloatPosition {
+        &self.physical_object.placed_object.position
     }
 
-    pub fn small_moon(id: u32) -> Self {
-        Self::new(
-            id,
-            "Small Moon".to_string(),
-            CelestialType::Moon,
-            PhysicalObject::default(),
-            10000.0, // 10km radius
-            1.62,    // Moon-like gravity
-            false,
-        )
+    pub fn get_orientation(&self) -> &FloatOrientation {
+        &self.physical_object.placed_object.orientation
     }
 
-    pub fn asteroid(id: u32) -> Self {
-        Self::new(
-            id,
-            "Asteroid".to_string(),
-            CelestialType::Asteroid,
-            PhysicalObject::default(),
-            500.0, // 500m radius
-            0.1,   // Very low gravity
-            false,
-        )
+    pub fn get_velocity(&self) -> &Velocity {
+        &self.physical_object.velocity
+    }
+
+    pub fn get_acceleration(&self) -> &Acceleration {
+        &self.physical_object.acceleration
+    }
+
+    pub fn set_position(&mut self, position: FloatPosition) {
+        self.physical_object.placed_object.position = position;
+    }
+
+    pub fn set_orientation(&mut self, orientation: FloatOrientation) {
+        self.physical_object.placed_object.orientation = orientation;
+    }
+
+    pub fn set_velocity(&mut self, velocity: Velocity) {
+        self.physical_object.velocity = velocity;
+    }
+
+    pub fn set_acceleration(&mut self, acceleration: Acceleration) {
+        self.physical_object.acceleration = acceleration;
     }
     
     /// Enregistre un changement à appliquer plus tard
@@ -173,21 +169,21 @@ impl CelestialDelta {
     }
     
     /// Applique le delta à un corps céleste
-    pub fn apply_to(&self, celestial: &mut CelestialBody) {
+    pub fn apply_to(&self, celestial: &mut Celestial) {
         if let Some(ref pos) = self.position {
-            celestial.physical.placed.position = pos.clone();
+            celestial.physical_object.placed_object.position = pos.clone();
         }
         
         if let Some(ref orient) = self.orientation {
-            celestial.physical.placed.orientation = orient.clone();
+            celestial.physical_object.placed_object.orientation = orient.clone();
         }
         
         if let Some(ref vel) = self.velocity {
-            celestial.physical.velocity = vel.clone();
+            celestial.physical_object.velocity = vel.clone();
         }
         
         if let Some(ref accel) = self.acceleration {
-            celestial.physical.acceleration = accel.clone();
+            celestial.physical_object.acceleration = accel.clone();
         }
     }
     

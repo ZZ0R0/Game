@@ -1,4 +1,4 @@
-use glam::{Vec3, Quat};
+use glam::{Quat, Vec3};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FloatPosition {
@@ -18,6 +18,10 @@ impl FloatPosition {
 
     pub fn to_vec3(&self) -> Vec3 {
         Vec3::new(self.x, self.y, self.z)
+    }
+
+    pub fn undefined() -> Self {
+        Self::new(f32::NAN, f32::NAN, f32::NAN)
     }
 }
 
@@ -79,7 +83,6 @@ impl IntDistance {
     }
 }
 
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Velocity {
     pub x: f32,
@@ -94,6 +97,10 @@ impl Velocity {
 
     pub fn zero() -> Self {
         Self::new(0.0, 0.0, 0.0)
+    }
+
+    pub fn undefined() -> Self {
+        Self::new(f32::NAN, f32::NAN, f32::NAN)
     }
 }
 
@@ -111,6 +118,10 @@ impl Acceleration {
 
     pub fn zero() -> Self {
         Self::new(0.0, 0.0, 0.0)
+    }
+
+    pub fn undefined() -> Self {
+        Self::new(f32::NAN, f32::NAN, f32::NAN)
     }
 }
 
@@ -133,6 +144,10 @@ impl FloatOrientation {
     pub fn to_quat(&self) -> Quat {
         Quat::from_euler(glam::EulerRot::XYZ, self.pitch, self.yaw, self.roll)
     }
+
+    pub fn undefined() -> Self {
+        Self::new(f32::NAN, f32::NAN, f32::NAN)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -152,34 +167,12 @@ impl IntOrientation {
     }
 
     pub fn to_quat(&self) -> Quat {
-        Quat::from_euler(glam::EulerRot::XYZ, self.pitch as f32, self.yaw as f32, self.roll as f32)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Volume {
-    pub points: Vec<(f32, f32, f32)>,
-    pub position: (f32, f32, f32),
-}
-
-impl Volume {
-    pub fn new() -> Self {
-        Self {
-            points: Vec::new(),
-            position: (0.0, 0.0, 0.0),
-        }
-    }
-
-    pub fn unit_cube() -> Self {
-        Self {
-            points: vec![
-                (-0.5, -0.5, -0.5), (0.5, -0.5, -0.5),
-                (0.5, 0.5, -0.5), (-0.5, 0.5, -0.5),
-                (-0.5, -0.5, 0.5), (0.5, -0.5, 0.5),
-                (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5),
-            ],
-            position: (0.0, 0.0, 0.0),
-        }
+        Quat::from_euler(
+            glam::EulerRot::XYZ,
+            self.pitch as f32,
+            self.yaw as f32,
+            self.roll as f32,
+        )
     }
 }
 
@@ -187,42 +180,129 @@ impl Volume {
 pub struct PlacedObject {
     pub position: FloatPosition,
     pub orientation: FloatOrientation,
-    pub volume: Volume,
 }
 
 impl PlacedObject {
-    pub fn new(position: FloatPosition, orientation: FloatOrientation, volume: Volume) -> Self {
-        Self { position, orientation, volume }
+    pub fn new(position: FloatPosition, orientation: FloatOrientation) -> Self {
+        Self {
+            position,
+            orientation,
+        }
     }
 
     pub fn default() -> Self {
         Self {
             position: FloatPosition::zero(),
             orientation: FloatOrientation::identity(),
-            volume: Volume::unit_cube(),
+        }
+    }
+
+    pub fn undefined() -> Self {
+        Self {
+            position: FloatPosition::undefined(),
+            orientation: FloatOrientation::undefined(),
         }
     }
 }
+
+
+#[derive(Debug, Clone, Copy)]
+pub struct RectBounds {
+    pub x_min: i32,
+    pub x_max: i32,
+    pub y_min: i32,
+    pub y_max: i32,
+    pub z_min: i32,
+    pub z_max: i32,
+}
+impl RectBounds {
+    pub fn null() -> Self {
+        Self {
+            x_min: 0,
+            x_max: 0,
+            y_min: 0,
+            y_max: 0,
+            z_min: 0,
+            z_max: 0,
+        }
+    }
+
+    pub fn undefined() -> Self {
+        Self {
+            x_min: i32::MIN,
+            x_max: i32::MAX,
+            y_min: i32::MIN,
+            y_max: i32::MAX,
+            z_min: i32::MIN,
+            z_max: i32::MAX,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CircleBounds {
+    pub radius: f32,
+}
+impl CircleBounds {
+    pub fn null() -> Self {
+        Self { radius: 0.0 }
+    }
+
+    pub fn undefined() -> Self {
+        Self { radius: f32::NAN }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Boundaries {
+    Rect(RectBounds),
+    Circle(CircleBounds),
+}
+
+impl Boundaries {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Boundaries::Rect(_) => "Rectangular",
+            Boundaries::Circle(_) => "Circular",
+        }
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct PhysicalObject {
-    pub placed: PlacedObject,
+    pub placed_object: PlacedObject,
     pub velocity: Velocity,
     pub acceleration: Acceleration,
     pub mass: f32,
+    pub boundaries: Boundaries,
 }
 
 impl PhysicalObject {
-    pub fn new(placed: PlacedObject, velocity: Velocity, acceleration: Acceleration, mass: f32) -> Self {
-        Self { placed, velocity, acceleration, mass }
+    pub fn new(
+        placed_object: PlacedObject,
+        velocity: Velocity,
+        acceleration: Acceleration,
+        mass: f32,
+        boundaries: Boundaries,
+    ) -> Self {
+        Self {
+            placed_object,
+            velocity,
+            acceleration,
+            mass,
+            boundaries,
+        }
     }
 
-    pub fn default() -> Self {
+    pub fn undefined() -> Self {
         Self {
-            placed: PlacedObject::default(),
-            velocity: Velocity::zero(),
-            acceleration: Acceleration::zero(),
-            mass: 1.0,
+            placed_object: PlacedObject::undefined(),
+            velocity: Velocity::undefined(),
+            acceleration: Acceleration::undefined(),
+            mass: f32::NAN,
+            boundaries: Boundaries::Rect(RectBounds::undefined()),
         }
     }
 }
+

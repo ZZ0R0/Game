@@ -1,4 +1,6 @@
-use game_objects::{grids, players, celestials};
+use crate::grids::{Grid, GridDelta};
+use crate::players::{Player, PlayerDelta};
+use crate::celestials::{Celestial, CelestialDelta};
 use serde;
 use std::collections::HashMap;
 use Vec;
@@ -7,9 +9,9 @@ use Vec;
 pub struct World {
     pub seed : u64,
     pub name : String,
-    pub grids : Vec<grids::Grid>,
-    pub players : Vec<players::Player>,
-    pub celestials : Vec<celestials::CelestialBody>,
+    pub grids : Vec<Grid>,
+    pub players : Vec<Player>,
+    pub celestials : Vec<Celestial>,
     pub time : f64,
     /// Liste des changements en attente (pour le système de delta)
     pub pending_deltas: Vec<WorldDelta>,
@@ -85,15 +87,15 @@ pub struct WorldDelta {
     
     /// Changements des grilles (HashMap<grid_id, GridDelta>)
     /// Contient uniquement les grilles qui ont changé
-    pub grids_delta: HashMap<u32, grids::GridDelta>,
+    pub grids_delta: HashMap<u32, GridDelta>,
     
     /// Changements des joueurs (HashMap<player_id, PlayerDelta>)
     /// Contient uniquement les joueurs qui ont changé
-    pub players_delta: HashMap<u32, players::PlayerDelta>,
+    pub players_delta: HashMap<u32, PlayerDelta>,
     
     /// Changements des corps célestes (HashMap<celestial_id, CelestialDelta>)
     /// Contient uniquement les corps célestes qui ont changé
-    pub celestials_delta: HashMap<u32, celestials::CelestialDelta>,
+    pub celestials_delta: HashMap<u32, CelestialDelta>,
     
     /// Timestamp du delta (pour ordering)
     pub timestamp: u64,
@@ -217,17 +219,17 @@ impl WorldDelta {
     }
     
     /// Ajoute un GridDelta au WorldDelta
-    pub fn add_grid_delta(&mut self, grid_delta: grids::GridDelta) {
+    pub fn add_grid_delta(&mut self, grid_delta: GridDelta) {
         self.grids_delta.insert(grid_delta.grid_id, grid_delta);
     }
     
     /// Ajoute un PlayerDelta au WorldDelta
-    pub fn add_player_delta(&mut self, player_delta: players::PlayerDelta) {
+    pub fn add_player_delta(&mut self, player_delta: PlayerDelta) {
         self.players_delta.insert(player_delta.player_id, player_delta);
     }
     
     /// Ajoute un CelestialDelta au WorldDelta
-    pub fn add_celestial_delta(&mut self, celestial_delta: celestials::CelestialDelta) {
+    pub fn add_celestial_delta(&mut self, celestial_delta: CelestialDelta) {
         self.celestials_delta.insert(celestial_delta.celestial_id, celestial_delta);
     }
     

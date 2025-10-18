@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 game-core = { path = "../game_core" }
-game-protocol = { path = "../game_protocol" }
 game-renderer = { path = "../game_renderer" }
 winit = "0.30"
 tokio = { version = "1", features = ["full"] }
