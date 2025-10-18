@@ -1,15 +1,16 @@
-// Game objects library - contains all the core game object structures
-
 pub mod blocks;
+pub mod camera;
 pub mod celestials;
+pub mod entities;
+pub mod factions;
 pub mod grids;
 pub mod humanoids;
 pub mod inventory;
 pub mod items;
-pub mod objects;
+pub mod mapping;
+pub mod physics;
 pub mod players;
 pub mod volume;
-pub mod factions;
 pub mod world;
-pub mod chunks;
-pub mod entities;
+
+pub use game_utils as utils;

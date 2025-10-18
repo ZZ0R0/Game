@@ -1,6 +1,9 @@
-use crate::objects::{PhysicalObject, FloatPosition, FloatOrientation, Velocity, Acceleration};
+// celestials.rs — version corrigée : compatible arène (HasId<u32>), IDs u32 
+use crate::utils::arena::HasId;
+use crate::physics::{Acceleration, FloatOrientation, FloatPosition, PhysicalObject, Velocity};
+use std::f32::NAN;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CelestialId(pub u32);
 
 #[derive(Debug, Clone)]
@@ -9,6 +12,7 @@ pub enum CelestialType {
     Moon,
     Asteroid,
     Star,
+    Undefined
 }
 
 #[derive(Debug, Clone)]
@@ -20,8 +24,16 @@ pub struct Celestial {
     pub radius: f32,
     pub gravity_strength: f32,
     pub atmosphere: bool,
-    /// Liste des changements en attente (pour le système de delta)
+    /// Deltas en attente
     pub pending_deltas: Vec<CelestialDelta>,
+}
+
+// Pour Arena<Celestial, u32>
+impl HasId<u32> for Celestial {
+    #[inline]
+    fn id_ref(&self) -> &u32 {
+        &self.id.0
+    }
 }
 
 impl Celestial {
@@ -46,61 +58,61 @@ impl Celestial {
         }
     }
 
+    #[inline]
     pub fn get_position(&self) -> &FloatPosition {
         &self.physical_object.placed_object.position
     }
-
+    #[inline]
     pub fn get_orientation(&self) -> &FloatOrientation {
         &self.physical_object.placed_object.orientation
     }
-
+    #[inline]
     pub fn get_velocity(&self) -> &Velocity {
         &self.physical_object.velocity
     }
-
+    #[inline]
     pub fn get_acceleration(&self) -> &Acceleration {
         &self.physical_object.acceleration
     }
 
-    pub fn set_position(&mut self, position: FloatPosition) {
-        self.physical_object.placed_object.position = position;
+    #[inline]
+    pub fn set_position(&mut self, p: FloatPosition) {
+        self.physical_object.placed_object.position = p;
+    }
+    #[inline]
+    pub fn set_orientation(&mut self, o: FloatOrientation) {
+        self.physical_object.placed_object.orientation = o;
+    }
+    #[inline]
+    pub fn set_velocity(&mut self, v: Velocity) {
+        self.physical_object.velocity = v;
+    }
+    #[inline]
+    pub fn set_acceleration(&mut self, a: Acceleration) {
+        self.physical_object.acceleration = a;
     }
 
-    pub fn set_orientation(&mut self, orientation: FloatOrientation) {
-        self.physical_object.placed_object.orientation = orientation;
-    }
-
-    pub fn set_velocity(&mut self, velocity: Velocity) {
-        self.physical_object.velocity = velocity;
-    }
-
-    pub fn set_acceleration(&mut self, acceleration: Acceleration) {
-        self.physical_object.acceleration = acceleration;
-    }
-    
-    /// Enregistre un changement à appliquer plus tard
     pub fn record_delta(&mut self, delta: CelestialDelta) {
         self.pending_deltas.push(delta);
     }
-    
-    /// Applique tous les deltas en attente et retourne le delta global fusionné
+
     pub fn compute_and_apply_pending_deltas(&mut self) -> Option<CelestialDelta> {
         if self.pending_deltas.is_empty() {
             return None;
         }
-        
-        let merged = CelestialDelta::merge(self.pending_deltas.clone());
-        
-        if let Some(ref delta) = merged {
-            delta.apply_to(self);
+        let merged = CelestialDelta::merge(std::mem::take(&mut self.pending_deltas));
+        if let Some(ref d) = merged {
+            d.apply_to(self);
         }
-        
-        self.pending_deltas.clear();
         merged
     }
-    
-    /// Crée un delta pour un changement de position (pour les corps en mouvement)
-    pub fn create_position_delta(&self, new_position: FloatPosition, timestamp: u64, sequence: u64) -> CelestialDelta {
+
+    pub fn create_position_delta(
+        &self,
+        new_position: FloatPosition,
+        timestamp: u64,
+        sequence: u64,
+    ) -> CelestialDelta {
         CelestialDelta {
             celestial_id: self.id.0,
             position: Some(new_position),
@@ -111,9 +123,13 @@ impl Celestial {
             sequence,
         }
     }
-    
-    /// Crée un delta pour un changement de rotation
-    pub fn create_rotation_delta(&self, new_orientation: FloatOrientation, timestamp: u64, sequence: u64) -> CelestialDelta {
+
+    pub fn create_rotation_delta(
+        &self,
+        new_orientation: FloatOrientation,
+        timestamp: u64,
+        sequence: u64,
+    ) -> CelestialDelta {
         CelestialDelta {
             celestial_id: self.id.0,
             position: None,
@@ -126,36 +142,19 @@ impl Celestial {
     }
 }
 
-/// Delta représentant les changements d'un corps céleste entre deux états
-/// 
-/// Les corps célestes peuvent bouger (orbites) et tourner sur eux-mêmes.
-/// Ce delta permet de synchroniser ces mouvements sur le réseau.
+/// Delta céleste
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CelestialDelta {
-    /// ID du corps céleste concerné
     pub celestial_id: u32,
-    
-    /// Position dans l'espace (None si inchangée)
     pub position: Option<FloatPosition>,
-    
-    /// Orientation/Rotation (None si inchangée)
     pub orientation: Option<FloatOrientation>,
-    
-    /// Vélocité orbitale (None si inchangée)
     pub velocity: Option<Velocity>,
-    
-    /// Accélération (None si inchangée)
     pub acceleration: Option<Acceleration>,
-    
-    /// Timestamp du delta
     pub timestamp: u64,
-    
-    /// Numéro de séquence
     pub sequence: u64,
 }
 
 impl CelestialDelta {
-    /// Crée un delta vide
     pub fn empty(celestial_id: u32, timestamp: u64, sequence: u64) -> Self {
         Self {
             celestial_id,
@@ -167,67 +166,54 @@ impl CelestialDelta {
             sequence,
         }
     }
-    
-    /// Applique le delta à un corps céleste
+
     pub fn apply_to(&self, celestial: &mut Celestial) {
         if let Some(ref pos) = self.position {
             celestial.physical_object.placed_object.position = pos.clone();
         }
-        
-        if let Some(ref orient) = self.orientation {
-            celestial.physical_object.placed_object.orientation = orient.clone();
+        if let Some(ref o) = self.orientation {
+            celestial.physical_object.placed_object.orientation = o.clone();
         }
-        
-        if let Some(ref vel) = self.velocity {
-            celestial.physical_object.velocity = vel.clone();
+        if let Some(ref v) = self.velocity {
+            celestial.physical_object.velocity = v.clone();
         }
-        
-        if let Some(ref accel) = self.acceleration {
-            celestial.physical_object.acceleration = accel.clone();
+        if let Some(ref a) = self.acceleration {
+            celestial.physical_object.acceleration = a.clone();
         }
     }
-    
-    /// Fusionne plusieurs deltas en séquence
-    pub fn merge(deltas: Vec<CelestialDelta>) -> Option<CelestialDelta> {
+
+    pub fn merge(mut deltas: Vec<CelestialDelta>) -> Option<CelestialDelta> {
         if deltas.is_empty() {
             return None;
         }
-        
-        let mut sorted = deltas;
-        sorted.sort_by_key(|d| d.sequence);
-        
-        let mut merged = sorted[0].clone();
-        
-        for delta in sorted.iter().skip(1) {
-            if delta.position.is_some() {
-                merged.position = delta.position.clone();
+        deltas.sort_by_key(|d| d.sequence);
+        let mut merged = deltas[0].clone();
+        for d in deltas.into_iter().skip(1) {
+            if d.position.is_some() {
+                merged.position = d.position.clone();
             }
-            if delta.orientation.is_some() {
-                merged.orientation = delta.orientation.clone();
+            if d.orientation.is_some() {
+                merged.orientation = d.orientation.clone();
             }
-            if delta.velocity.is_some() {
-                merged.velocity = delta.velocity.clone();
+            if d.velocity.is_some() {
+                merged.velocity = d.velocity.clone();
             }
-            if delta.acceleration.is_some() {
-                merged.acceleration = delta.acceleration.clone();
+            if d.acceleration.is_some() {
+                merged.acceleration = d.acceleration.clone();
             }
-            
-            merged.timestamp = delta.timestamp;
-            merged.sequence = delta.sequence;
+            merged.timestamp = d.timestamp;
+            merged.sequence = d.sequence;
         }
-        
         Some(merged)
     }
-    
-    /// Vérifie si le delta est vide
+
     pub fn is_empty(&self) -> bool {
-        self.position.is_none() &&
-        self.orientation.is_none() &&
-        self.velocity.is_none() &&
-        self.acceleration.is_none()
+        self.position.is_none()
+            && self.orientation.is_none()
+            && self.velocity.is_none()
+            && self.acceleration.is_none()
     }
-    
-    /// Taille estimée en octets
+
     pub fn estimated_size(&self) -> usize {
         std::mem::size_of::<Self>()
     }
