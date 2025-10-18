@@ -1,6 +1,5 @@
-use crate::objects::{PhysicalObject, FloatPosition, IntPosition, FloatOrientation, Velocity, Acceleration};
+use crate::objects::{PhysicalObject, FloatPosition, FloatOrientation, Velocity, Acceleration};
 use crate::blocks::{Block, BlockDelta};
-use crate::validation::{EntityValidation, ValidationResult, ValidationContext};
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 use std::collections::HashMap;

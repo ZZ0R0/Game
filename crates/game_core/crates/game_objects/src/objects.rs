@@ -1,5 +1,4 @@
 use glam::{Vec3, Quat};
-use crate::validation::{EntityValidation, ValidationResult, ValidationContext, validate_position_change, validate_velocity_change, validate_speed_limit};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FloatPosition {
@@ -225,40 +224,5 @@ impl PhysicalObject {
             acceleration: Acceleration::zero(),
             mass: 1.0,
         }
-    }
-}
-
-impl EntityValidation for PhysicalObject {
-    fn validate_data(&self, previous: &Self, context: &ValidationContext) -> ValidationResult {
-        let mut result = ValidationResult::valid();
-
-        // Valider le changement de position
-        result = result.combine(validate_position_change(
-            &self.placed.position,
-            &previous.placed.position,
-            &self.velocity,
-            context,
-        ));
-
-        // Valider le changement de vitesse
-        result = result.combine(validate_velocity_change(
-            &self.velocity,
-            &previous.velocity,
-            context,
-        ));
-
-        // Valider la limite de vitesse
-        result = result.combine(validate_speed_limit(&self.velocity, context));
-
-        // Valider la masse (ne peut pas changer drastiquement)
-        let mass_change_ratio = (self.mass - previous.mass).abs() / previous.mass.max(0.1);
-        if mass_change_ratio > 0.5 { // 50% de changement max par update
-            result = result.with_error(format!(
-                "Mass change too large: {:.2}kg to {:.2}kg ({:.1}%)",
-                previous.mass, self.mass, mass_change_ratio * 100.0
-            ));
-        }
-
-        result
     }
 }

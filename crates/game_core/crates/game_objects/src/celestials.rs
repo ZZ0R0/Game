@@ -1,5 +1,4 @@
 use crate::objects::{PhysicalObject, FloatPosition, FloatOrientation, Velocity, Acceleration};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct CelestialId(pub u32);

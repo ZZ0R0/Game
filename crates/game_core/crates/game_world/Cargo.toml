@@ -7,3 +7,4 @@ edition = "2021"
 [dependencies]
 game_objects = { package = "game-objects", path = "../game_objects" }
 ahash = "0.8"
+serde = { version = "1.0", features = ["derive"] }
