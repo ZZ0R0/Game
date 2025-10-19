@@ -1,32 +1,19 @@
-# game_core — Rôle et frontières
+# game_core — rôle et frontières
 
 ## Rôle
-Point d’entrée partagé. Expose l’API publique minimale des sous-crates internes. Aucun code métier ici, seulement `lib.rs` qui ré-exporte.
+Point d’entrée partagé. Ici, uniquement l’API publique qui **ré-exporte** les sous‑crates internes. Pas de logique métier dans `src/`.
 
-Le repo définit que `game_core` contient les structures POO de base et la logique fondamentale du jeu, sans graphisme ni réseau. Les détails d’implémentation vivent dans des sous-crates dédiées. Cela suit les responsabilités décrites au README racine du projet. 
+## Contenu
+- `src/lib.rs` : ré‑exports des modules utiles depuis `crates/`.
+- `crates/` :
+  - `game_objects` : objets du jeu et logique associée.
+  - `game_utils`   : utilitaires génériques, indépendants des objets.
 
-## Contenu attendu
-- `src/lib.rs` : ré-exports stables vers les sous-crates.
-- `crates/` : sous-crates internes spécialisées, par exemple :
-  - `game_objects` : types d’objets du jeu et logique associée.
-  - `game_utils`   : utilitaires transverses indépendants des objets.
+## Hors‑périmètre
+- Pas de rendu, pas de réseau.
+- Pas de code client/serveur spécifique.
+- Pas de duplication d’IDs, d’arena ou de threading ici.
 
-## N’y met pas
-- Pas de rendu graphique.
-- Pas de code réseau.
-- Pas de logique spécifique client ou serveur.
-
-## Interface publique (exposition)
-- Types et traits de haut niveau ré-exportés depuis `game_objects`.
-- Outils génériques ré-exportés depuis `game_utils`.
-- Versionnement de l’API : conserver des chemins de modules stables.
-
-## Dossiers
-```
-crates/game_core/
-  ├─ src/
-  │   └─ lib.rs          # uniquement des `pub use` vers les sous-crates
-  └─ crates/
-      ├─ game_objects/   # logique des objets
-      └─ game_utils/     # utilitaires réutilisables
-```
+## Convention d’exposition
+- Ré‑exporter **sans renommer** les types stables.
+- Conserver des chemins d’accès stables pour le reste du workspace.
