@@ -7,10 +7,10 @@ pub mod grids;
 pub mod humanoids;
 pub mod inventory;
 pub mod items;
-pub mod mapping;
+pub mod logics;
 pub mod physics;
 pub mod players;
-pub mod volume;
+pub mod utils;
 pub mod world;
 
-pub use game_utils as utils;
+pub use game_utils;

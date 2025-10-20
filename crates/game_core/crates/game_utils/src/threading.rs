@@ -48,7 +48,11 @@ fn record_duration(label: &str, dur: Duration) {
 #[inline]
 fn to_report(label: &str, s: &RawStats) -> JobReport {
     let total_ms = s.total_ns as f64 / 1e6;
-    let avg_ms = if s.runs > 0 { total_ms / s.runs as f64 } else { 0.0 };
+    let avg_ms = if s.runs > 0 {
+        total_ms / s.runs as f64
+    } else {
+        0.0
+    };
     let max_ms = s.max_ns as f64 / 1e6;
     JobReport {
         label: label.to_string(),
@@ -82,7 +86,6 @@ fn auto_threads() -> usize {
         .max(1)
 }
 
-
 // ---------- Threader ----------
 pub struct Threader {
     tx: Sender<Job>,
@@ -109,7 +112,10 @@ impl Threader {
             }
         });
 
-        Self { tx, _dispatcher: dispatcher }
+        Self {
+            tx,
+            _dispatcher: dispatcher,
+        }
     }
 
     /// Envoi simple (bloque si file pleine).

@@ -1,15 +1,14 @@
-
-use game_protocol::{Message, PlayerAction, connection::GameClient, WorldSnapshot};
-use game_renderer::{Renderer, Camera, InputHandler, BlockInstance};
-use winit::{
-    event::{WindowEvent, DeviceEvent, KeyEvent},
-    event_loop::{EventLoop, ActiveEventLoop},
-    window::Window,
-    keyboard::{KeyCode, PhysicalKey},
-    application::ApplicationHandler,
-};
+use game_protocol::{connection::GameClient, Message, PlayerAction, WorldSnapshot};
+use game_renderer::{BlockInstance, Camera, InputHandler, Renderer};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use winit::{
+    application::ApplicationHandler,
+    event::{DeviceEvent, KeyEvent, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::Window,
+};
 
 /// Thread-safe game state shared between main thread and network thread
 #[derive(Debug, Clone)]
@@ -71,9 +70,9 @@ impl GameApp {
 
     fn start_networking(&mut self) {
         println!("Space Engineers Clone - Starting networking thread");
-        
+
         let shared_state = Arc::clone(&self.shared_state);
-        
+
         // Spawn networking thread with tokio runtime
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -129,32 +128,33 @@ impl GameApp {
                 if let Some(ref world_state) = state.world_state {
                     if let Some(ref mut renderer) = self.renderer {
                         let mut blocks = Vec::new();
-                        
+
                         // Convert all ships' blocks to BlockInstances
                         for (_ship_id, ship) in &world_state.ships {
-                            let ship_pos = glam::Vec3::new(
-                                ship.position.x,
-                                ship.position.y,
-                                ship.position.z,
-                            );
-                            
+                            let ship_pos =
+                                glam::Vec3::new(ship.position.x, ship.position.y, ship.position.z);
+
                             for block in &ship.blocks {
                                 // Calculate world position: ship position + block relative position (2.5m per block for large grids)
-                                let block_world_pos = ship_pos + glam::Vec3::new(
-                                    block.position.x as f32 * 2.5,
-                                    block.position.y as f32 * 2.5,
-                                    block.position.z as f32 * 2.5,
-                                );
-                                
+                                let block_world_pos = ship_pos
+                                    + glam::Vec3::new(
+                                        block.position.x as f32 * 2.5,
+                                        block.position.y as f32 * 2.5,
+                                        block.position.z as f32 * 2.5,
+                                    );
+
                                 blocks.push(BlockInstance {
                                     id: block.id,
                                     version: ship.version,
                                     position: block_world_pos,
-                                    texture_path: format!("assets/textures/large_grids/{}.png", block.block_type),
+                                    texture_path: format!(
+                                        "assets/textures/large_grids/{}.png",
+                                        block.block_type
+                                    ),
                                 });
                             }
                         }
-                        
+
                         renderer.set_blocks_to_render(blocks);
                     }
                 }
@@ -167,10 +167,13 @@ impl GameApp {
         // Update overlay data in renderer
         if let Some(ref mut renderer) = self.renderer {
             let player_pos = if let Ok(state) = self.shared_state.try_lock() {
-                if let (Some(ref world_state), Some(player_id)) = (&state.world_state, state.player_id) {
-                    world_state.players.get(&player_id).map(|p| {
-                        glam::Vec3::new(p.position.x, p.position.y, p.position.z)
-                    })
+                if let (Some(ref world_state), Some(player_id)) =
+                    (&state.world_state, state.player_id)
+                {
+                    world_state
+                        .players
+                        .get(&player_id)
+                        .map(|p| glam::Vec3::new(p.position.x, p.position.y, p.position.z))
                 } else {
                     None
                 }
@@ -183,18 +186,14 @@ impl GameApp {
         let t5 = std::time::Instant::now();
         let d4 = t5.duration_since(t4).as_millis();
 
-       // println!("Update timings: get_state={}ms, process_state={}ms, update_overlay={}ms", d2, d3, d4);
+        // println!("Update timings: get_state={}ms, process_state={}ms, update_overlay={}ms", d2, d3, d4);
     }
-
-
 
     fn send_action(&self, action: PlayerAction) {
         if let Ok(mut state) = self.shared_state.try_lock() {
             state.pending_actions.push(action);
         }
     }
-
-
 }
 
 impl ApplicationHandler for GameApp {
@@ -202,28 +201,35 @@ impl ApplicationHandler for GameApp {
         let window_attributes = Window::default_attributes()
             .with_title("Space Engineers Clone")
             .with_inner_size(winit::dpi::LogicalSize::new(800.0, 600.0));
-            
+
         let window = event_loop.create_window(window_attributes).unwrap();
         let window = Arc::new(window);
-        
+
         // Create renderer
         let renderer = pollster::block_on(Renderer::new(window.clone())).unwrap();
         self.renderer = Some(renderer);
-        
+
         // Start networking thread
         self.start_networking();
-        
+
         // Capture mouse for FPS controls
         if let Some(ref renderer) = self.renderer {
             renderer.window().set_cursor_visible(false);
-            let _ = renderer.window().set_cursor_grab(winit::window::CursorGrabMode::Confined);
+            let _ = renderer
+                .window()
+                .set_cursor_grab(winit::window::CursorGrabMode::Confined);
             self.mouse_captured = true;
         }
-        
+
         // TODO: Connect to server when networking is implemented
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
         match event {
             WindowEvent::CloseRequested => {
                 println!("Space Engineers Clone shutting down...");
@@ -232,20 +238,22 @@ impl ApplicationHandler for GameApp {
             WindowEvent::Resized(physical_size) => {
                 if let Some(ref mut renderer) = self.renderer {
                     renderer.resize(physical_size);
-                    self.camera.update_aspect(physical_size.width as f32, physical_size.height as f32);
+                    self.camera
+                        .update_aspect(physical_size.width as f32, physical_size.height as f32);
                 }
             }
             WindowEvent::KeyboardInput {
-                event: KeyEvent {
-                    physical_key: PhysicalKey::Code(key_code),
-                    state,
-                    ..
-                },
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(key_code),
+                        state,
+                        ..
+                    },
                 ..
             } => {
                 // Handle FPS controls
                 self.input_handler.process_keyboard(key_code, state);
-                
+
                 // Handle game actions
                 if state == winit::event::ElementState::Pressed {
                     match key_code {
@@ -255,9 +263,13 @@ impl ApplicationHandler for GameApp {
                                 self.mouse_captured = !self.mouse_captured;
                                 renderer.window().set_cursor_visible(!self.mouse_captured);
                                 if self.mouse_captured {
-                                    let _ = renderer.window().set_cursor_grab(winit::window::CursorGrabMode::Confined);
+                                    let _ = renderer
+                                        .window()
+                                        .set_cursor_grab(winit::window::CursorGrabMode::Confined);
                                 } else {
-                                    let _ = renderer.window().set_cursor_grab(winit::window::CursorGrabMode::None);
+                                    let _ = renderer
+                                        .window()
+                                        .set_cursor_grab(winit::window::CursorGrabMode::None);
                                 }
                             }
                         }
@@ -276,7 +288,9 @@ impl ApplicationHandler for GameApp {
                             if let Some(ref renderer) = self.renderer {
                                 self.is_fullscreen = !self.is_fullscreen;
                                 if self.is_fullscreen {
-                                    renderer.window().set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                                    renderer.window().set_fullscreen(Some(
+                                        winit::window::Fullscreen::Borderless(None),
+                                    ));
                                 } else {
                                     renderer.window().set_fullscreen(None);
                                 }
@@ -289,11 +303,11 @@ impl ApplicationHandler for GameApp {
             }
             WindowEvent::RedrawRequested => {
                 self.update();
-                
+
                 if let Some(ref mut renderer) = self.renderer {
                     // Update camera matrices in renderer
                     renderer.update_camera(&self.camera);
-                    
+
                     match renderer.render() {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size()),
@@ -306,7 +320,12 @@ impl ApplicationHandler for GameApp {
         }
     }
 
-    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _device_id: winit::event::DeviceId, event: DeviceEvent) {
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 if self.mouse_captured {
@@ -326,7 +345,7 @@ impl ApplicationHandler for GameApp {
 
 async fn run_network_client(shared_state: Arc<Mutex<SharedGameState>>) {
     println!("Network thread started");
-    
+
     // Connect to server
     let mut client = GameClient::new();
     loop {
@@ -345,16 +364,16 @@ async fn run_network_client(shared_state: Arc<Mutex<SharedGameState>>) {
             }
         }
     }
-    
+
     // Send connect message
-    let _ = client.send_message(Message::Connect { 
-        player_name: "SpaceEngineer".to_string()
+    let _ = client.send_message(Message::Connect {
+        player_name: "SpaceEngineer".to_string(),
     });
-    
+
     // Get sender and receiver
     let ws_tx = client.ws_tx.clone();
     let mut client_rx = client.message_rx;
-    
+
     // Spawn task to handle server messages
     let shared_state_msgs = Arc::clone(&shared_state);
     tokio::spawn(async move {
@@ -362,29 +381,29 @@ async fn run_network_client(shared_state: Arc<Mutex<SharedGameState>>) {
             handle_network_message(&shared_state_msgs, message).await;
         }
     });
-    
+
     // Main network loop: send pending actions and position updates
     if let Some(tx) = ws_tx {
         let mut last_position_send = std::time::Instant::now();
         let position_send_interval = std::time::Duration::from_millis(16); // ~60 FPS
-        
+
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            
+
             if let Ok(mut state) = shared_state.try_lock() {
                 // Send pending actions
                 for action in state.pending_actions.drain(..) {
                     let msg = Message::PlayerAction { action };
                     let _ = tx.send(msg);
                 }
-                
+
                 // Send position updates periodically
                 let now = std::time::Instant::now();
                 if now.duration_since(last_position_send) >= position_send_interval {
-                    let position_msg = Message::PlayerAction { 
-                        action: PlayerAction::UpdatePosition { 
-                            position: state.player_position.clone() 
-                        }
+                    let position_msg = Message::PlayerAction {
+                        action: PlayerAction::UpdatePosition {
+                            position: state.player_position.clone(),
+                        },
                     };
                     let _ = tx.send(position_msg);
                     last_position_send = now;
@@ -397,9 +416,15 @@ async fn run_network_client(shared_state: Arc<Mutex<SharedGameState>>) {
 async fn handle_network_message(shared_state: &Arc<Mutex<SharedGameState>>, message: Message) {
     if let Ok(mut state) = shared_state.lock() {
         match message {
-            Message::Welcome { player_id, world_state } => {
-                println!("Welcome! Player {} in world with {} ships", 
-                        player_id, world_state.ships.len());
+            Message::Welcome {
+                player_id,
+                world_state,
+            } => {
+                println!(
+                    "Welcome! Player {} in world with {} ships",
+                    player_id,
+                    world_state.ships.len()
+                );
                 state.player_id = Some(player_id);
                 state.world_state = Some(world_state);
             }
@@ -418,12 +443,11 @@ async fn handle_network_message(shared_state: &Arc<Mutex<SharedGameState>>, mess
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Space Engineers Clone - 3D Construction Game");
     println!("Controls: WASD=move, Shift=sprint, Space/Ctrl=up/down, Mouse=look, F=place block, G=spawn ship, ESC=toggle mouse, F11=fullscreen");
-    
+
     let event_loop = EventLoop::new()?;
     let mut app = GameApp::new();
-    
+
     event_loop.run_app(&mut app)?;
-    
+
     Ok(())
 }
-

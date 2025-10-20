@@ -14,7 +14,7 @@ pub trait HasId<Id> {
     }
 }
 
-/// Arène générique: stockage par SlotMap + index Id -> clé
+#[Debug]
 pub struct Arena<T, Id>
 where
     Id: Eq + Hash + Copy,
@@ -91,7 +91,6 @@ where
         self.slab.clone()
     }
 }
-
 
 impl<T, Id> Clone for Arena<T, Id>
 where

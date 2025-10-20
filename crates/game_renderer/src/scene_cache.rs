@@ -1,6 +1,6 @@
-use wgpu::BindGroup;
 use ahash::AHashMap;
 use std::hash::Hash;
+use wgpu::BindGroup;
 
 /// Identifiant unique pour un objet rendu
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,11 +35,17 @@ impl SceneCache {
 
     /// Met en cache un bind group pour un objet
     pub fn cache_bind_group(&mut self, object_id: u32, version: u64, bind_group: BindGroup) {
-        let id = ObjectId { id: object_id, version };
-        
+        let id = ObjectId {
+            id: object_id,
+            version,
+        };
+
         // Nettoie l'ancienne version si elle existe
         if let Some(&old_version) = self.object_versions.get(&object_id) {
-            let old_id = ObjectId { id: object_id, version: old_version };
+            let old_id = ObjectId {
+                id: object_id,
+                version: old_version,
+            };
             self.bind_groups.remove(&old_id);
         }
 
@@ -49,17 +55,21 @@ impl SceneCache {
 
     /// Récupère un bind group depuis le cache
     pub fn get_bind_group(&self, object_id: u32, version: u64) -> Option<&BindGroup> {
-        let id = ObjectId { id: object_id, version };
+        let id = ObjectId {
+            id: object_id,
+            version,
+        };
         self.bind_groups.get(&id)
     }
 
     /// Nettoie les entrées obsolètes du cache
     pub fn cleanup_old_entries(&mut self, active_objects: &[(u32, u64)]) {
         let active_ids: AHashMap<u32, u64> = active_objects.iter().copied().collect();
-        
+
         // Supprime les objets qui ne sont plus actifs
         self.bind_groups.retain(|object_id, _| {
-            active_ids.get(&object_id.id)
+            active_ids
+                .get(&object_id.id)
                 .map_or(false, |&version| version == object_id.version)
         });
 
