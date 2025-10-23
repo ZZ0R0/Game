@@ -1,5 +1,5 @@
 pub mod components;
-pub mod logics;
+pub mod objects;
 
 pub use components::*;
-pub use logics::*;
+pub use objects::*;

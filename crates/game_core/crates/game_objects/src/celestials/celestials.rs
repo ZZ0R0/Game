@@ -1,6 +1,7 @@
-// celestials.rs — version corrigée : compatible arène (HasId<u32>), IDs u32
+// celestials.rs — Celestial + remove() simple
+
 use crate::physics::PhysicalObject;
-use crate::utils::arenas::HasId;
+use crate::utils::arenas::{with_current_write, HasId};
 use crate::utils::ids::EntityId;
 
 #[derive(Debug, Clone)]
@@ -25,7 +26,7 @@ pub enum CelestialType {
     Undefined,
 }
 
-// Pour Arena<Celestial, u32>
+// Pour Arena<Celestial, EntityId>
 impl HasId<EntityId> for Celestial {
     #[inline]
     fn id_ref(&self) -> &EntityId {
@@ -58,11 +59,25 @@ impl Celestial {
             pending_deltas: Vec::new(),
         }
     }
+
+    /// Suppression non récursive (pas de contenu enfant pour l’instant)
+    #[inline]
+    pub fn remove(id: EntityId) -> bool {
+        with_current_write(|a| {
+            let existed = a.remove_entity(id).is_some();
+            if existed {
+                a.lists.entity_ids.retain(|&x| x != id);
+                a.lists.physical_entity_ids.retain(|&x| x != id);
+                a.lists.celestial_ids.retain(|&x| x != id);
+            }
+            existed
+        })
+    }
 }
 
 /// Delta céleste
 #[derive(Debug, Clone)]
 pub struct CelestialDelta {
-    timestamp: u64,
+    pub timestamp: u64,
     pub id: EntityId,
 }

@@ -1,6 +1,9 @@
-// blocks.rs — Block stockable en arène (HasId<u32>), aucune référence forte à Grid
+// blocks.rs — Block + remove() interne
+
+use crate::entities::Entity;
 use crate::physics::{IntOrientation, IntPosition};
-use crate::utils::arenas::HasId;
+use crate::utils::arenas::Arenas;
+use crate::utils::arenas::{with_current_write, Arena, HasId};
 use crate::utils::ids::{BlockDefId, EntityId, FactionId};
 use std::sync::Arc;
 
@@ -51,7 +54,7 @@ pub struct Block {
     pub faction_id: FactionId,
 }
 
-// Pour Arena<Block, u32>
+// Pour Arena<Block, EntityId>
 impl HasId<EntityId> for Block {
     #[inline]
     fn id_ref(&self) -> &EntityId {
@@ -77,11 +80,54 @@ impl Block {
             id,
             grid_id,
             current_mass: def.mass,
-            def: def,
-            position: position,
-            orientation: orientation,
+            def,
+            position,
+            orientation,
             current_integrity: integrity,
-            faction_id: faction_id,
+            faction_id,
         }
+    }
+
+    /// Supprime ce block et le détache de sa grille
+    #[inline]
+    pub fn remove(id: EntityId) -> bool {
+        with_current_write(|a| Self::remove_with_ctx(a, id))
+    }
+
+    /// Version interne réutilisable depuis d'autres objets (évite re-lock)
+    pub(crate) fn remove_with_ctx(a: &mut Arenas, block_id: EntityId) -> bool {
+        let Some(h) = a.get_entity(block_id) else {
+            return false;
+        };
+
+        // lire la grid cible
+        let grid_id_opt = {
+            let g = h.read().unwrap();
+            if let Entity::Block(ref b) = *g {
+                Some(b.grid_id)
+            } else {
+                None
+            }
+        };
+
+        // retirer l'id du block de la grid si existante
+        if let Some(grid_id) = grid_id_opt {
+            if let Some(gh) = a.get_entity(grid_id) {
+                let mut gw = gh.write().unwrap();
+                if let Entity::Grid(ref mut grid) = *gw {
+                    grid.block_ids.retain(|&x| x != block_id);
+                }
+            }
+        }
+
+        // suppression shallow de l'arène + listes globales
+        let existed = a.remove_entity(block_id).is_some();
+        if existed {
+            a.lists.entity_ids.retain(|&x| x != block_id);
+            a.lists.physical_entity_ids.retain(|&x| x != block_id);
+            a.lists.logical_entity_ids.retain(|&x| x != block_id);
+            a.lists.block_ids.retain(|&x| x != block_id);
+        }
+        existed
     }
 }

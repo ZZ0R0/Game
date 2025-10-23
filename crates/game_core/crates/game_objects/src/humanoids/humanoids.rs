@@ -1,9 +1,12 @@
+// humanoids.rs — Humanoid stocké en entité globale + remove() interne
+
 use crate::entities::Entity;
 use crate::logics::components::antenna::Antenna;
 use crate::logics::{LogicalObject, LogicalObjectDelta};
 use crate::physics::{PhysicalObject, PhysicalObjectDelta};
 use crate::utils::arenas::with_current_write;
 use crate::utils::ids::EntityId;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone)]
 pub struct Humanoid {
@@ -21,7 +24,6 @@ impl Humanoid {
 
             // LogicalObject + composants locaux
             let mut lo = LogicalObject::new(None);
-            // exemple: antenne par défaut
             let _ant_id = Antenna::spawn(&mut lo, 10.0, 10_000.0, 200.0, true, None);
 
             let h = Humanoid {
@@ -31,8 +33,8 @@ impl Humanoid {
                 logical_object: Some(lo),
                 pending_deltas: Vec::new(),
             };
-            let e = Entity::Humanoid(h);
 
+            let e = Arc::new(RwLock::new(Entity::Humanoid(h)));
             let back = a.insert_entity(e);
             debug_assert_eq!(back, id);
 
@@ -41,6 +43,36 @@ impl Humanoid {
             a.tag_logical(id);
             a.tag_humanoid(id);
             id
+        })
+    }
+
+    /// Supprime récursivement cet humanoïde (nettoie ses composants)
+    #[inline]
+    pub fn remove(id: EntityId) -> bool {
+        with_current_write(|a| {
+            let Some(h) = a.get_entity(id) else {
+                return false;
+            };
+
+            {
+                let mut g = h.write().unwrap();
+                if let Entity::Humanoid(ref mut hu) = *g {
+                    if let Some(ref mut lo) = hu.logical_object {
+                        lo.clear_components();
+                    }
+                } else {
+                    return false;
+                }
+            }
+
+            let existed = a.remove_entity(id).is_some();
+            if existed {
+                a.lists.entity_ids.retain(|&x| x != id);
+                a.lists.physical_entity_ids.retain(|&x| x != id);
+                a.lists.logical_entity_ids.retain(|&x| x != id);
+                a.lists.humanoid_ids.retain(|&x| x != id);
+            }
+            existed
         })
     }
 

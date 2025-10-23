@@ -1,3 +1,5 @@
+// components.rs — inchangé fonctionnellement
+
 use crate::logics::components::antenna::{Antenna, AntennaDelta};
 use crate::logics::LogicalObject;
 use crate::utils::arenas::HasId;
@@ -6,11 +8,6 @@ use crate::utils::ids::LogicalComponentId;
 #[derive(Debug, Clone)]
 pub enum LogicalComponent {
     Antenna(Antenna),
-    // Inventory(Inventory),
-    // Tank(Tank),
-    // Thruster(Thruster),
-    // Health(Health),
-    // Energy(Energy),
 }
 
 impl HasId<LogicalComponentId> for LogicalComponent {
@@ -31,11 +28,6 @@ impl HasId<LogicalComponentId> for LogicalComponent {
 #[derive(Debug, Clone)]
 pub enum LogicalComponentDelta {
     Antenna(AntennaDelta),
-    // Inventory(InventoryDelta),
-    // Tank(TankDelta),
-    // Thruster(ThrusterDelta),
-    // Health(HealthDelta),
-    // Energy(EnergyDelta),
 }
 
 impl LogicalComponentDelta {

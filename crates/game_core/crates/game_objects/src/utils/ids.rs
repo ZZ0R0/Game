@@ -1,19 +1,21 @@
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+// ids.rs
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorldId(pub u32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EntityId(pub u32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CellId(pub i32, pub i32, pub i32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ChunkId(pub i32, pub i32, pub i32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RegionId(pub i32, pub i32, pub i32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FactionId(pub u32);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -33,10 +35,10 @@ impl MapId {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlayerId(pub u32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LogicalComponentId(pub u32);
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -59,5 +61,11 @@ impl BlockDefId {
     pub fn unique_key(&self) -> u64 {
         let type_id: u64 = if self.is_large() { 1 } else { 2 };
         (type_id << 32) | (self.value() as u64)
+    }
+}
+
+impl From<u32> for EntityId {
+    fn from(v: u32) -> Self {
+        EntityId(v)
     }
 }

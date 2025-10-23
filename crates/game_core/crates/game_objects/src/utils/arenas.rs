@@ -1,6 +1,4 @@
-// arenas.rs — exposition haut-niveau des arènes pour le jeu
-// Fine-grained locking: stocker Arc<RwLock<_>> dans l’arène des entités.
-// Les arènes locales (ex: LogicalObject.components) utilisent insert()/get() de arena.rs.
+// arenas.rs — exposition haut-niveau (pas de remove_* récursifs ici)
 
 pub use game_utils::arena::{ArcRw, Arena, HasId};
 
@@ -67,20 +65,17 @@ macro_rules! define_arenas {
             }
 
             $(
-                /// Allocation d'un nouvel Id via compteur atomique.
                 #[inline]
                 pub fn $alloc_id_fn(&self) -> $id {
                     let v = self.counters.entity.fetch_add(1, Ordering::Relaxed);
                     $id(v)
                 }
 
-                /// Place une valeur sous `k`. Retourne l'ancienne si remplacement.
                 #[inline]
                 pub fn $set_fn(&mut self, k: $id, v: $ty) -> Option<$ty> {
                     self.$field.set(k, v)
                 }
 
-                /// Alloue un Id puis set(). Retourne l'Id.
                 #[inline]
                 pub fn $insert_fn(&mut self, v: $ty) -> $id {
                     let id = self.$alloc_id_fn();
@@ -88,7 +83,6 @@ macro_rules! define_arenas {
                     id
                 }
 
-                /// Récupère un handle cloné (ex: Arc<RwLock<_>>)
                 #[inline]
                 pub fn $get_fn(&self, id: $id) -> Option<$ty>
                 where
@@ -97,7 +91,6 @@ macro_rules! define_arenas {
                     self.$field.get_cloned(id)
                 }
 
-                /// Version "mut" logique: rend aussi un handle cloné.
                 #[inline]
                 pub fn $get_mut_fn(&self, id: $id) -> Option<$ty>
                 where
@@ -106,14 +99,13 @@ macro_rules! define_arenas {
                     self.$field.get_cloned(id)
                 }
 
-                /// Supprime et retourne la valeur.
                 #[inline]
                 pub fn $remove_fn(&mut self, id: $id) -> Option<$ty> {
                     self.$field.remove(id)
                 }
             )+
 
-            // --- helpers de tagging (poussent l'EntityId dans les listes) -----
+            // --- helpers de tagging ---
             #[inline] pub fn tag_entity(&mut self, id: EntityId)    { $crate::utils::arenas::push_unique(&mut self.lists.entity_ids, id); }
             #[inline] pub fn tag_physical(&mut self, id: EntityId)  { $crate::utils::arenas::push_unique(&mut self.lists.physical_entity_ids, id); }
             #[inline] pub fn tag_logical(&mut self, id: EntityId)   { $crate::utils::arenas::push_unique(&mut self.lists.logical_entity_ids, id); }
@@ -125,7 +117,6 @@ macro_rules! define_arenas {
 }
 
 // ==== arènes concrètes ========================================================
-// Stockage finement verrouillable: Arc<RwLock<Entity>>
 define_arenas! {
     entities: Arc<std::sync::RwLock<Entity>>, EntityId,
         alloc_id_fn= alloc_entity_id,

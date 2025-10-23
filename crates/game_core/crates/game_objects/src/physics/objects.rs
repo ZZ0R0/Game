@@ -1,8 +1,9 @@
+// physics.rs
+
+use crate::physics::boundaries::Boundaries;
+use crate::physics::metrics::{Acceleration, FloatOrientation, FloatPosition, Velocity};
 use crate::utils::ids::MapId;
 use crate::utils::mapping::pos_to_map_id;
-use crate::physics::metrics::{FloatPosition, Velocity, Acceleration, FloatOrientation};
-use crate::physics::boundaries::Boundaries;
-
 
 /* -------------------- Physical object -------------------- */
 
@@ -20,7 +21,6 @@ pub struct PhysicalObject {
 }
 
 impl PhysicalObject {
-    // Constructeur pur: ne fait que construire.
     pub fn new(
         timestamp: Option<u64>,
         position: Option<FloatPosition>,
@@ -43,6 +43,11 @@ impl PhysicalObject {
             map_id,
             pending_deltas,
         }
+    }
+
+    #[inline]
+    pub fn clear_pending_deltas(&mut self) {
+        self.pending_deltas.clear();
     }
 
     pub fn record_delta(&mut self, delta: PhysicalObjectDelta) {
@@ -78,7 +83,7 @@ pub struct PhysicalObjectDelta {
     pub acceleration: Option<Acceleration>,
     pub mass: Option<f32>,
     pub boundaries: Option<Boundaries>,
-    pub mapp_id: Option<MapId>,
+    pub map_id: Option<MapId>,
 }
 
 impl PhysicalObjectDelta {
@@ -107,8 +112,8 @@ impl PhysicalObjectDelta {
             if d.boundaries.is_some() {
                 m.boundaries = d.boundaries;
             }
-            if d.mapp_id.is_some() {
-                m.mapp_id = d.mapp_id;
+            if d.map_id.is_some() {
+                m.map_id = d.map_id;
             }
             if d.timestamp.is_some() {
                 m.timestamp = d.timestamp;
@@ -139,7 +144,7 @@ impl PhysicalObjectDelta {
         if let Some(b) = self.boundaries.clone() {
             e.boundaries = Some(b);
         }
-        if let Some(id) = self.mapp_id {
+        if let Some(id) = self.map_id {
             e.map_id = Some(id);
         }
     }

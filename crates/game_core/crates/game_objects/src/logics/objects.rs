@@ -1,3 +1,5 @@
+// logics.rs — arène locale + helpers de purge/clear
+
 use crate::logics::components::{LogicalComponent, LogicalComponentDelta};
 use crate::utils::arenas::Arena;
 use crate::utils::ids::LogicalComponentId;
@@ -5,11 +7,6 @@ use crate::utils::ids::LogicalComponentId;
 #[derive(Default, Debug, Clone)]
 pub struct ComponentLists {
     pub antenna_ids: Vec<LogicalComponentId>,
-    // pub inventory_ids: Vec<LogicalComponentId>,
-    // pub tank_ids: Vec<LogicalComponentId>,
-    // pub thruster_ids: Vec<LogicalComponentId>,
-    // pub health_ids: Vec<LogicalComponentId>,
-    // pub energy_ids: Vec<LogicalComponentId>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +51,26 @@ impl LogicalObject {
         }
     }
 
+    // ---------- maintenance listes ----------
+    #[inline]
+    pub fn purge_dead_component_ids(&mut self) {
+        self.components
+            .retain_existing_ids(&mut self.comp_lists.antenna_ids);
+    }
+
+    #[inline]
+    pub fn remove_component(&mut self, id: LogicalComponentId) -> Option<LogicalComponent> {
+        self.comp_lists.antenna_ids.retain(|&x| x != id);
+        self.components.remove(id)
+    }
+
+    /// Vide toutes les listes et réinitialise l’arène locale
+    pub fn clear_components(&mut self) {
+        self.comp_lists.antenna_ids.clear();
+        self.components = Arena::new();
+        self.comp_counter = 0;
+    }
+
     // ---------- deltas ----------
     pub fn record_delta(&mut self, delta: LogicalObjectDelta) {
         self.pending_deltas.push(delta);
@@ -75,16 +92,16 @@ impl LogicalObject {
 
 #[derive(Debug, Clone)]
 pub enum LogicalOp {
-    /// Ajoute un nouveau composant (déjà construit avec son id).
-    Add { component: LogicalComponent },
-    /// Attache un id existant à la bonne liste (utile si restauré depuis save).
-    AttachAntenna { id: LogicalComponentId },
-    /// Met à jour un composant ciblé.
+    Add {
+        component: LogicalComponent,
+    },
+    AttachAntenna {
+        id: LogicalComponentId,
+    },
     Update {
         id: LogicalComponentId,
         delta: LogicalComponentDelta,
     },
-    /// Détache et optionnellement supprimer de l’arène.
     Remove {
         id: LogicalComponentId,
         delete: bool,
@@ -122,7 +139,6 @@ impl LogicalObjectDelta {
             match op {
                 LogicalOp::Add { component } => {
                     let id = lo.insert_component(component);
-                    // tag automatique si besoin (détecter le type)
                     if let Some(c) = lo.components.get(id) {
                         match c {
                             LogicalComponent::Antenna(_) => lo.tag_antenna(id),

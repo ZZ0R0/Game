@@ -1,11 +1,13 @@
-// grids.rs — Grid stockant UNIQUEMENT des EntityId de blocks (blocks = entités globales)
+// grids.rs — Grid ne stocke que les EntityId de blocks ; remove() récursif
 
+use crate::blocks::Block;
 use crate::entities::Entity;
 use crate::logics::{LogicalObject, LogicalObjectDelta};
 use crate::physics::boundaries::RectBoundaries;
 use crate::physics::{PhysicalObject, PhysicalObjectDelta};
 use crate::utils::arenas::with_current_write;
 use crate::utils::ids::EntityId;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, Hash)]
 pub enum GridSizeClass {
@@ -22,7 +24,7 @@ pub struct Grid {
     pub size_class: Option<GridSizeClass>,
     pub boundaries: Option<RectBoundaries>,
     pub pending_deltas: Vec<GridDelta>,
-    /// Uniquement des IDs d'entités de type Block
+    /// IDs des entités Block appartenant à cette grille
     pub block_ids: Vec<EntityId>,
 }
 
@@ -46,8 +48,8 @@ impl Grid {
                 pending_deltas: Vec::new(),
                 block_ids: Vec::new(),
             };
-            let e = Entity::Grid(g);
 
+            let e = Arc::new(RwLock::new(Entity::Grid(g)));
             let back = a.insert_entity(e);
             debug_assert_eq!(back, id);
 
@@ -58,8 +60,62 @@ impl Grid {
         })
     }
 
-    // ---- Gestion des blocks via IDs -----------------------------------------
+    /// Supprime récursivement la grille et tous ses blocks
+    #[inline]
+    pub fn remove(id: EntityId) -> bool {
+        with_current_write(|a| {
+            let Some(h) = a.get_entity(id) else {
+                return false;
+            };
 
+            // collecter les enfants block
+            let block_ids = {
+                let g = h.read().unwrap();
+                if let Entity::Grid(ref grid) = *g {
+                    grid.block_ids.clone()
+                } else {
+                    return false;
+                }
+            };
+
+            // supprimer les blocks à l'intérieur du même lock global
+            for bid in block_ids {
+                Block::remove_with_ctx(a, bid);
+            }
+
+            // purge logique locale et IDs
+            {
+                let mut g = h.write().unwrap();
+                if let Entity::Grid(ref mut grid) = *g {
+                    if let Some(ref mut lo) = grid.logical_object {
+                        lo.clear_components();
+                    }
+                    grid.block_ids.clear();
+                }
+            }
+
+            // suppression shallow + nettoyage listes globales
+            let existed = a.remove_entity(id).is_some();
+            if existed {
+                a.lists.entity_ids.retain(|&x| x != id);
+                a.lists.physical_entity_ids.retain(|&x| x != id);
+                a.lists.logical_entity_ids.retain(|&x| x != id);
+            }
+            existed
+        })
+    }
+
+    /// Supprime un block (par id) de la grille et de l’arène globale
+    #[inline]
+    pub fn remove_block(&mut self, bid: EntityId) -> bool {
+        let removed = with_current_write(|a| Block::remove_with_ctx(a, bid));
+        if removed {
+            self.block_ids.retain(|&x| x != bid);
+        }
+        removed
+    }
+
+    // ---------- Gestion des blocks par IDs ----------
     #[inline]
     pub fn add_block_id(&mut self, bid: EntityId) {
         if !self.block_ids.contains(&bid) {
@@ -68,7 +124,7 @@ impl Grid {
     }
 
     #[inline]
-    pub fn remove_block_id(&mut self, bid: EntityId) -> bool {
+    pub fn remove_block_id_local(&mut self, bid: EntityId) -> bool {
         let len0 = self.block_ids.len();
         self.block_ids.retain(|&x| x != bid);
         self.block_ids.len() != len0
@@ -86,8 +142,7 @@ impl Grid {
         self.block_ids = ids;
     }
 
-    // ---- Deltas -------------------------------------------------------------
-
+    // ---------- Deltas ----------
     pub fn record_delta(&mut self, delta: GridDelta) {
         self.pending_deltas.push(delta);
     }
