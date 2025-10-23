@@ -35,17 +35,19 @@ fn push_unique<T: PartialEq>(v: &mut Vec<T>, x: T) {
 macro_rules! define_arenas {
     (
         $(
-            $field:ident : $ty:ty, $id:ty,
+            $field:ident : $ty:ty, $id:path,
+            alloc_id_fn = $alloc_id_fn:ident,
+            set_fn = $set_fn:ident,
             insert_fn = $insert_fn:ident,
             get_fn    = $get_fn:ident,
             get_mut_fn= $get_mut_fn:ident,
-            remove_fn = $remove_fn:ident
+            remove_fn = $remove_fn:ident,
         );+ $(;)?
     ) => {
         pub struct Arenas {
             $( pub $field: $crate::utils::arenas::Arena<$ty, $id>, )+
             pub lists: $crate::utils::arenas::IdLists,
-            pub counters: $crate::utils::arenas::IdCounters,
+            pub counters: $crate::utils::arenas::IdCounters, --
         }
 
         impl Arenas {
@@ -59,24 +61,27 @@ macro_rules! define_arenas {
             }
 
             $(
-                #[inline] pub fn $insert_fn(&mut self, v: $ty) -> $id { self.$field.insert(v) }
+                #[inline]
+                pub fn $alloc_id_fn(&mut self) -> $id {
+                    let v = self.counters.entity;
+                    self.counters.entity = v.wrapping_add(1);
+                    $id(v) // now valid because $id is a path
+                }
+
+                #[inline] pub fn $set_fn(&mut self, k: $id, v: $ty) -> Option<$ty> { self.$field.set(k, v) }
+                #[inline] pub fn $insert_fn(&mut self, v: $ty) -> $id { let id = self.$alloc_id_fn(); let _ = self.$set_fn(id, v); id }
                 #[inline] pub fn $get_fn(&self, id: $id) -> Option<&$ty> { self.$field.get(id) }
                 #[inline] pub fn $get_mut_fn(&mut self, id: $id) -> Option<&mut $ty> { self.$field.get_mut(id) }
                 #[inline] pub fn $remove_fn(&mut self, id: $id) -> Option<$ty> { self.$field.remove(id) }
             )+
 
-            // --- alloc d'EntityId (si tu veux auto-générer avant insertion) --
-            #[inline] pub fn alloc_entity_id(&mut self) -> EntityId {
-                let v = self.counters.entity; self.counters.entity += 1; EntityId(v)
-            }
-
             // --- helpers de tagging (poussent l'EntityId dans les listes) -----
-            #[inline] pub fn tag_entity(&mut self, id: EntityId)              { $crate::utils::arenas::push_unique(&mut self.lists.entity_ids, id); }
-            #[inline] pub fn tag_physical(&mut self, id: EntityId)            { $crate::utils::arenas::push_unique(&mut self.lists.physical_entity_ids, id); }
-            #[inline] pub fn tag_logical(&mut self, id: EntityId)             { $crate::utils::arenas::push_unique(&mut self.lists.logical_entity_ids, id); }
-            #[inline] pub fn tag_humanoid(&mut self, id: EntityId)            { $crate::utils::arenas::push_unique(&mut self.lists.humanoid_ids, id); }
-            #[inline] pub fn tag_celestial(&mut self, id: EntityId)           { $crate::utils::arenas::push_unique(&mut self.lists.celestial_ids, id); }
-            #[inline] pub fn tag_block(&mut self, id: EntityId)               { $crate::utils::arenas::push_unique(&mut self.lists.block_ids, id); }
+            #[inline] pub fn tag_entity(&mut self, id: EntityId)    { $crate::utils::arenas::push_unique(&mut self.lists.entity_ids, id); }
+            #[inline] pub fn tag_physical(&mut self, id: EntityId)  { $crate::utils::arenas::push_unique(&mut self.lists.physical_entity_ids, id); }
+            #[inline] pub fn tag_logical(&mut self, id: EntityId)   { $crate::utils::arenas::push_unique(&mut self.lists.logical_entity_ids, id); }
+            #[inline] pub fn tag_humanoid(&mut self, id: EntityId)  { $crate::utils::arenas::push_unique(&mut self.lists.humanoid_ids, id); }
+            #[inline] pub fn tag_celestial(&mut self, id: EntityId) { $crate::utils::arenas::push_unique(&mut self.lists.celestial_ids, id); }
+            #[inline] pub fn tag_block(&mut self, id: EntityId)     { $crate::utils::arenas::push_unique(&mut self.lists.block_ids, id); }
         }
     }
 }
@@ -84,10 +89,12 @@ macro_rules! define_arenas {
 // ==== arènes concrètes ========================================================
 define_arenas! {
     entities: Entity, EntityId,
+        alloc_id_fn= alloc_entity_id,
+        set_fn = set_entity,
         insert_fn = insert_entity,
-        get_fn    = entity,
-        get_mut_fn= entity_mut,
-        remove_fn = remove_entity;
+        get_fn    = get_entity,
+        get_mut_fn= get_entity_mut,
+        remove_fn = remove_entity,
 }
 
 // ==== TLS handle (inchangé) ===================================================

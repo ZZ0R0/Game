@@ -1,5 +1,5 @@
 // world.rs — un monde possède son instance d’arènes
-use crate::arenas::{Arenas, SharedArenas};
+use crate::utils::arenas::{Arenas, SharedArenas};
 use std::sync::{Arc, RwLock};
 
 pub struct World {
@@ -22,7 +22,7 @@ impl World {
 
     /// Ouvre une scope TLS liant *ce monde* comme courant.
     #[inline]
-    pub fn scope(&self) -> crate::arenas::ArenasScope {
-        crate::arenas::enter_scope(self.arenas.clone())
+    pub fn scope(&self) -> crate::utils::arenas::ArenasScope {
+        crate::utils::arenas::enter_scope(self.arenas.clone())
     }
 }

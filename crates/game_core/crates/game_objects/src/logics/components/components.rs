@@ -46,9 +46,6 @@ impl LogicalComponentDelta {
                 (LogicalComponent::Antenna(ref mut ant), LogicalComponentDelta::Antenna(d)) => {
                     d.apply_to(ant)
                 }
-                // (LogicalComponent::Inventory(ref mut inv), ComponentDelta::Inventory(d)) => d.apply_to(inv),
-                // ...
-                _ => { /* type mismatch: ignorer ou tracer */ }
             }
         }
     }

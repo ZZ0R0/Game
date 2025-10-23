@@ -82,7 +82,7 @@ pub enum LogicalOp {
     /// Met à jour un composant ciblé.
     Update {
         id: LogicalComponentId,
-        delta: ComponentDelta,
+        delta: LogicalComponentDelta,
     },
     /// Détache et optionnellement supprimer de l’arène.
     Remove {

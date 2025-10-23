@@ -10,11 +10,11 @@ type SmKey = DefaultKey;
 pub trait HasId<Id> {
     fn id_ref(&self) -> &Id;
     fn id_mut(&mut self) -> &mut Id {
-        unreachable!("optionnel: pas utilisé ici")
+        unreachable!("HasId::id_mut non implémenté pour ce type; requis par Arena::set")
     }
 }
 
-#[Debug]
+#[derive(Debug)]
 pub struct Arena<T, Id>
 where
     Id: Eq + Hash + Copy,
@@ -45,6 +45,28 @@ where
         id
     }
 
+    /// Place `value` sous l'Id `id`. Remplace et retourne l'ancien si présent.
+    pub fn set(&mut self, id: Id, mut value: T) -> Option<T> {
+        // Forcer la cohérence Id porté par la valeur
+        if *value.id_ref() != id {
+            *value.id_mut() = id;
+        }
+
+        if let Some(&k) = self.index.get(&id) {
+            if let Some(slot) = self.slab.get_mut(k) {
+                // Remplacement en place
+                let old = std::mem::replace(slot, value);
+                return Some(old);
+            }
+            // Clé orpheline: retomber sur une insertion propre
+        }
+
+        let k = self.slab.insert(value);
+        let prev = self.index.insert(id, k);
+        debug_assert!(prev.is_none(), "index incohérent: Id présent sans entrée valide dans slab");
+        None
+    }
+
     /// Accès immuable via Id
     pub fn get(&self, id: Id) -> Option<&T> {
         self.index.get(&id).and_then(|&k| self.slab.get(k))
@@ -67,7 +89,7 @@ where
         }
     }
 
-    /// Itération immuable sur (Id, &T) — via la slab, sans closures capturant `self`
+    /// Itération immuable sur (Id, &T)
     pub fn iter(&self) -> impl Iterator<Item = (Id, &T)> {
         self.slab.iter().map(|(_k, v)| (*v.id_ref(), v))
     }
