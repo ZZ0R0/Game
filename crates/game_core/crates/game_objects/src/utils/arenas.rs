@@ -1,11 +1,17 @@
-// arenas.rs — listes d'IDs + arènes + TLS
-pub use game_utils::arena::{Arena, HasId};
+// arenas.rs — exposition haut-niveau des arènes pour le jeu
+// Fine-grained locking: stocker Arc<RwLock<_>> dans l’arène des entités.
+// Les arènes locales (ex: LogicalObject.components) utilisent insert()/get() de arena.rs.
+
+pub use game_utils::arena::{ArcRw, Arena, HasId};
 
 use crate::entities::Entity;
 use crate::utils::ids::EntityId;
 
 use std::cell::RefCell;
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc, RwLock,
+};
 
 // --- vues multiples: toutes en EntityId --------------------------------------
 #[derive(Default)]
@@ -18,10 +24,10 @@ pub struct IdLists {
     pub block_ids: Vec<EntityId>,
 }
 
-// Compteur simple d'EntityId (par monde)
+// Compteur d'EntityId (atomic)
 #[derive(Default)]
 pub struct IdCounters {
-    pub entity: u32,
+    pub entity: AtomicU32,
 }
 
 #[inline]
@@ -47,7 +53,7 @@ macro_rules! define_arenas {
         pub struct Arenas {
             $( pub $field: $crate::utils::arenas::Arena<$ty, $id>, )+
             pub lists: $crate::utils::arenas::IdLists,
-            pub counters: $crate::utils::arenas::IdCounters, --
+            pub counters: $crate::utils::arenas::IdCounters,
         }
 
         impl Arenas {
@@ -61,18 +67,50 @@ macro_rules! define_arenas {
             }
 
             $(
+                /// Allocation d'un nouvel Id via compteur atomique.
                 #[inline]
-                pub fn $alloc_id_fn(&mut self) -> $id {
-                    let v = self.counters.entity;
-                    self.counters.entity = v.wrapping_add(1);
-                    $id(v) // now valid because $id is a path
+                pub fn $alloc_id_fn(&self) -> $id {
+                    let v = self.counters.entity.fetch_add(1, Ordering::Relaxed);
+                    $id(v)
                 }
 
-                #[inline] pub fn $set_fn(&mut self, k: $id, v: $ty) -> Option<$ty> { self.$field.set(k, v) }
-                #[inline] pub fn $insert_fn(&mut self, v: $ty) -> $id { let id = self.$alloc_id_fn(); let _ = self.$set_fn(id, v); id }
-                #[inline] pub fn $get_fn(&self, id: $id) -> Option<&$ty> { self.$field.get(id) }
-                #[inline] pub fn $get_mut_fn(&mut self, id: $id) -> Option<&mut $ty> { self.$field.get_mut(id) }
-                #[inline] pub fn $remove_fn(&mut self, id: $id) -> Option<$ty> { self.$field.remove(id) }
+                /// Place une valeur sous `k`. Retourne l'ancienne si remplacement.
+                #[inline]
+                pub fn $set_fn(&mut self, k: $id, v: $ty) -> Option<$ty> {
+                    self.$field.set(k, v)
+                }
+
+                /// Alloue un Id puis set(). Retourne l'Id.
+                #[inline]
+                pub fn $insert_fn(&mut self, v: $ty) -> $id {
+                    let id = self.$alloc_id_fn();
+                    let _ = self.$set_fn(id, v);
+                    id
+                }
+
+                /// Récupère un handle cloné (ex: Arc<RwLock<_>>)
+                #[inline]
+                pub fn $get_fn(&self, id: $id) -> Option<$ty>
+                where
+                    $ty: Clone,
+                {
+                    self.$field.get_cloned(id)
+                }
+
+                /// Version "mut" logique: rend aussi un handle cloné.
+                #[inline]
+                pub fn $get_mut_fn(&self, id: $id) -> Option<$ty>
+                where
+                    $ty: Clone,
+                {
+                    self.$field.get_cloned(id)
+                }
+
+                /// Supprime et retourne la valeur.
+                #[inline]
+                pub fn $remove_fn(&mut self, id: $id) -> Option<$ty> {
+                    self.$field.remove(id)
+                }
             )+
 
             // --- helpers de tagging (poussent l'EntityId dans les listes) -----
@@ -87,8 +125,9 @@ macro_rules! define_arenas {
 }
 
 // ==== arènes concrètes ========================================================
+// Stockage finement verrouillable: Arc<RwLock<Entity>>
 define_arenas! {
-    entities: Entity, EntityId,
+    entities: Arc<std::sync::RwLock<Entity>>, EntityId,
         alloc_id_fn= alloc_entity_id,
         set_fn = set_entity,
         insert_fn = insert_entity,
@@ -97,7 +136,7 @@ define_arenas! {
         remove_fn = remove_entity,
 }
 
-// ==== TLS handle (inchangé) ===================================================
+// ==== TLS handle ==============================================================
 pub type SharedArenas = Arc<RwLock<Arenas>>;
 
 thread_local! { static ARENAS_STACK: RefCell<Vec<SharedArenas>> = RefCell::new(Vec::new()); }

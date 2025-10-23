@@ -1,13 +1,11 @@
-// grids.rs — arène locale de blocks par grid + API minimale
+// grids.rs — Grid stockant UNIQUEMENT des EntityId de blocks (blocks = entités globales)
 
-use crate::blocks::Block;
 use crate::entities::Entity;
 use crate::logics::{LogicalObject, LogicalObjectDelta};
 use crate::physics::boundaries::RectBoundaries;
 use crate::physics::{PhysicalObject, PhysicalObjectDelta};
 use crate::utils::arenas::with_current_write;
-use crate::utils::arenas::{Arena, HasId};
-use crate::utils::ids::{EntityId, PlayerId};
+use crate::utils::ids::EntityId;
 
 #[derive(Debug, Clone, Hash)]
 pub enum GridSizeClass {
@@ -24,29 +22,26 @@ pub struct Grid {
     pub size_class: Option<GridSizeClass>,
     pub boundaries: Option<RectBoundaries>,
     pub pending_deltas: Vec<GridDelta>,
+    /// Uniquement des IDs d'entités de type Block
     pub block_ids: Vec<EntityId>,
 }
 
-impl HasId<EntityId> for Grid {
-    fn id_ref(&self) -> &EntityId {
-        &self.id
-    }
-    fn id_mut(&mut self) -> &mut EntityId {
-        &mut self.id
-    }
-}
-
 impl Grid {
-    pub fn spawn(name: Option<String>, physical_object: Option<PhysicalObject>, logical_object: Option<LogicalObject>, size_class: Option<GridSizeClass>) -> EntityId {
+    pub fn spawn(
+        name: Option<String>,
+        physical_object: Option<PhysicalObject>,
+        logical_object: Option<LogicalObject>,
+        size_class: Option<GridSizeClass>,
+    ) -> EntityId {
         with_current_write(|a| {
             let id = a.alloc_entity_id();
 
             let g = Grid {
-                id: id,
-                name: name,
-                physical_object: physical_object,
-                logical_object: logical_object,
-                size_class: size_class,
+                id,
+                name,
+                physical_object,
+                logical_object,
+                size_class,
                 boundaries: Some(RectBoundaries::null()),
                 pending_deltas: Vec::new(),
                 block_ids: Vec::new(),
@@ -59,10 +54,39 @@ impl Grid {
             a.tag_entity(id);
             a.tag_physical(id);
             a.tag_logical(id);
-            a.tag_humanoid(id);
             id
         })
     }
+
+    // ---- Gestion des blocks via IDs -----------------------------------------
+
+    #[inline]
+    pub fn add_block_id(&mut self, bid: EntityId) {
+        if !self.block_ids.contains(&bid) {
+            self.block_ids.push(bid);
+        }
+    }
+
+    #[inline]
+    pub fn remove_block_id(&mut self, bid: EntityId) -> bool {
+        let len0 = self.block_ids.len();
+        self.block_ids.retain(|&x| x != bid);
+        self.block_ids.len() != len0
+    }
+
+    #[inline]
+    pub fn has_block_id(&self, bid: EntityId) -> bool {
+        self.block_ids.contains(&bid)
+    }
+
+    #[inline]
+    pub fn set_block_ids(&mut self, mut ids: Vec<EntityId>) {
+        ids.sort_unstable();
+        ids.dedup();
+        self.block_ids = ids;
+    }
+
+    // ---- Deltas -------------------------------------------------------------
 
     pub fn record_delta(&mut self, delta: GridDelta) {
         self.pending_deltas.push(delta);
@@ -78,66 +102,19 @@ impl Grid {
         }
         merged
     }
-
-    /// À appeler dans ton constructeur de Grid si tu en ajoutes un.
-    pub fn init_block_storage(&mut self) {
-        self.blocks = Arena::new();
-        self.block_ids = Vec::new();
-        self.block_counter = 0;
-    }
-
-    // ---------- Gestion IDs de blocks ----------
-    #[inline]
-    pub fn alloc_block_id(&mut self) -> BlockId {
-        let v = self.block_counter;
-        self.block_counter = v.wrapping_add(1);
-        BlockId(v)
-    }
-
-    // ---------- Arène locale API ----------
-    /// Insère un block déjà porteur de son `BlockId`. Retourne ce `BlockId`.
-    #[inline]
-    pub fn insert_block(&mut self, b: Block) -> BlockId {
-        let id = self.blocks.insert(b);
-        if !self.block_ids.contains(&id) {
-            self.block_ids.push(id);
-        }
-        id
-    }
-
-    #[inline]
-    pub fn block(&self, id: BlockId) -> Option<&Block> {
-        self.blocks.get(id)
-    }
-
-    #[inline]
-    pub fn block_mut(&mut self, id: BlockId) -> Option<&mut Block> {
-        self.blocks.get_mut(id)
-    }
-
-    #[inline]
-    pub fn remove_block(&mut self, id: BlockId) -> Option<Block> {
-        self.block_ids.retain(|&x| x != id);
-        self.blocks.remove(id)
-    }
 }
 
 #[derive(Debug, Clone)]
 pub struct GridDelta {
-    pub timestamp: u32,
-    pub entity_id: EntityId,
-}
-impl GridDelta {}
-
-#[derive(Debug, Clone)]
-pub struct HumanoidDelta {
     pub timestamp: Option<u64>,
     pub physical_object_delta: Option<PhysicalObjectDelta>,
     pub logical_object_delta: Option<LogicalObjectDelta>,
+    /// Remplacement complet optionnel de la liste d'IDs de blocks
+    pub block_ids: Option<Vec<EntityId>>,
 }
 
-impl HumanoidDelta {
-    pub fn merge(mut deltas: Vec<HumanoidDelta>) -> Option<HumanoidDelta> {
+impl GridDelta {
+    pub fn merge(mut deltas: Vec<GridDelta>) -> Option<GridDelta> {
         if deltas.is_empty() {
             return None;
         }
@@ -150,20 +127,29 @@ impl HumanoidDelta {
             if d.logical_object_delta.is_some() {
                 m.logical_object_delta = d.logical_object_delta;
             }
+            if d.block_ids.is_some() {
+                m.block_ids = d.block_ids;
+            }
         }
         Some(m)
     }
 
-    pub fn apply_to(&self, humanoid: &mut Humanoid) {
+    pub fn apply_to(&self, grid: &mut Grid) {
         if let Some(ref pod) = self.physical_object_delta {
-            if let Some(ref mut po) = humanoid.physical_object {
+            if let Some(ref mut po) = grid.physical_object {
                 pod.apply_to(po);
             }
         }
         if let Some(ref lod) = self.logical_object_delta {
-            if let Some(ref mut lo) = humanoid.logical_object {
+            if let Some(ref mut lo) = grid.logical_object {
                 lod.apply_to(lo);
             }
+        }
+        if let Some(ref ids) = self.block_ids {
+            let mut ids2 = ids.clone();
+            ids2.sort_unstable();
+            ids2.dedup();
+            grid.block_ids = ids2;
         }
     }
 }
